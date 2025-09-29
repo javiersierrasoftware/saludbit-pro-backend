@@ -1,26 +1,30 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
 import dotenv from 'dotenv';
-import authRoutes from './routes/auth.routes';
 import surveyRoutes from './routes/survey.routes';
+import authRoutes from './routes/auth.routes';
+import groupRoutes from './routes/group.routes';
+import { verifyToken } from './middleware/auth.middleware';
 
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Usar las rutas de autenticación
+// Rutas públicas (login y registro)
 app.use('/api/auth', authRoutes);
 
-// Usar las rutas de encuestas
-app.use('/api/surveys', surveyRoutes);
+// Rutas protegidas para usuarios (ver encuestas, responder, etc.)
+app.use('/api/surveys', verifyToken, surveyRoutes);
 
-app.get('/', (req: Request, res: Response) => {
-  res.send('¡El backend de ImpactoU está funcionando!');
+// Rutas protegidas para la gestión de grupos
+app.use('/api/groups', verifyToken, groupRoutes);
+
+app.get('/', (req, res) => {
+  res.send('API de SaludBit Pro está funcionando!');
 });
 
-
-app.listen(port, () => {
-  console.log(`Servidor corriendo en el puerto ${port}`);
+app.listen(PORT, () => {
+  console.log(`Servidor corriendo en el puerto ${PORT}`);
 });

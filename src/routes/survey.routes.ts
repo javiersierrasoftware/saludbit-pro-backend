@@ -1,46 +1,50 @@
 import { Router } from 'express';
-import { addQuestionToSurvey, createSurvey, deleteSurvey, exportSurveyResults, getAssignedSurveys, getQuestionById, getQuestionsForSurvey, getSurveyResults, updateQuestion, updateSurvey } from '../controllers/survey.controller';
+import { addQuestionToSurvey, createSurvey, deleteSurvey, exportSurveyResults, getAssignedSurveys, getAllSurveys, getQuestionById, getQuestionsForSurvey, getSurveyResults, updateQuestion, updateSurvey } from '../controllers/survey.controller';
 import { submitAnswers } from '../controllers/answer.controller';
-import { assignSurveyToInstitution } from '../controllers/assignment.controller';
-import { AuthRequest, verifyToken } from '../middleware/auth.middleware';
-import { verifyAdmin } from '../middleware/admin.middleware';
+import { assignSurveyToGroup, assignSurveyToInstitution } from '../controllers/assignment.controller';
 
 const router = Router();
 
-// Obtener encuestas asignadas (para cualquier usuario logueado)
-router.get('/', verifyToken, getAssignedSurveys);
+// Crear una nueva encuesta (solo para administradores) - Ruta específica para evitar conflictos
+router.post('/create', createSurvey);
 
-// Crear una nueva encuesta (solo para administradores)
-router.post('/', verifyToken, verifyAdmin, (req, res) => createSurvey(req as AuthRequest, res));
+// Obtener encuestas asignadas (para cualquier usuario logueado) - Esta debe ir después de las rutas específicas
+router.get('/', getAssignedSurveys);
 
-// Obtener las preguntas de una encuesta específica (para cualquier usuario logueado)
-router.get('/:surveyId/questions', verifyToken, getQuestionsForSurvey);
+// Obtener TODAS las encuestas (para selectores de admin) - Debe ir antes de las rutas con :surveyId
+router.get('/all', getAllSurveys);
 
 // Obtener los resultados de una encuesta (solo para administradores)
-router.get('/:surveyId/results', verifyToken, verifyAdmin, getSurveyResults);
+router.get('/:surveyId/results', getSurveyResults);
 
 // Exportar los resultados de una encuesta a CSV (solo para administradores)
-router.get('/:surveyId/export', verifyToken, verifyAdmin, exportSurveyResults);
+router.get('/:surveyId/export', exportSurveyResults);
 
 // Añadir una pregunta a una encuesta existente (solo para administradores)
-router.post('/:surveyId/questions', verifyToken, verifyAdmin, addQuestionToSurvey);
+router.post('/:surveyId/questions', addQuestionToSurvey);
 
 // Obtener una pregunta específica por ID (solo para administradores)
-router.get('/:surveyId/questions/:questionId', verifyToken, verifyAdmin, getQuestionById);
+router.get('/:surveyId/questions/:questionId', getQuestionById);
 
 // Actualizar una pregunta específica (solo para administradores)
-router.patch('/:surveyId/questions/:questionId', verifyToken, verifyAdmin, updateQuestion);
+router.patch('/:surveyId/questions/:questionId', updateQuestion);
 
 // Enviar las respuestas de una encuesta
-router.post('/:surveyId/answers', verifyToken, submitAnswers);
+router.post('/:surveyId/answers', submitAnswers);
 
 // Asignar una encuesta a todos los estudiantes de la institución (solo para administradores)
-router.post('/:surveyId/assign', verifyToken, verifyAdmin, assignSurveyToInstitution);
+router.post('/:surveyId/assign', assignSurveyToInstitution);
+
+// Asignar una encuesta a un grupo específico
+router.post('/:surveyId/assign-to-group', assignSurveyToGroup);
 
 // Actualizar una encuesta (solo para administradores)
-router.patch('/:surveyId', verifyToken, verifyAdmin, updateSurvey);
+router.patch('/:surveyId', updateSurvey);
 
 // Eliminar una encuesta (solo para administradores)
-router.delete('/:surveyId', verifyToken, verifyAdmin, deleteSurvey);
+router.delete('/:surveyId', deleteSurvey);
+
+// Obtener las preguntas de una encuesta específica (para cualquier usuario logueado)
+router.get('/:surveyId/questions', getQuestionsForSurvey);
 
 export default router;

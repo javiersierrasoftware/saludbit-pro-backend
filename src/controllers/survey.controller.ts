@@ -6,39 +6,41 @@ import { QuestionType } from '@prisma/client';
 export const getAssignedSurveys = async (req: AuthRequest, res: Response) => {
   const userId = req.userId;
 
+  // --- LOG DE RASTREO #3: VERIFICAR EL USUARIO QUE CONSULTA LAS ENCUESTAS ---
+  console.log(`\n🔍 [getAssignedSurveys] Petición para obtener encuestas del usuario con ID: ${userId}`);
+
   if (!userId) {
     return res.status(401).json({ message: 'Usuario no autenticado.' });
   }
 
   try {
-    // Hacemos una consulta más robusta que filtra los datos inválidos en la base de datos.
+    // Lógica Original y Correcta: Buscamos las asignaciones del usuario actual.
     const assignments = await prisma.surveyAssignment.findMany({
       where: {
         userId,
-        // Esta condición asegura que solo se incluyan asignaciones cuya encuesta
-        // relacionada exista y tenga una fecha de inicio.
-        // Esto previene errores con datos antiguos que no tienen este campo.
+        createdAt: { not: undefined }, // Filtro para ignorar registros con 'createdAt' nulo o ausente.
+      },
+      include: {
         survey: {
-          startDate: {
-            // Filtra cualquier cosa que no sea una fecha válida.
-            // 'gt: new Date(0)' es una forma de decir "es una fecha".
-            gt: new Date(0),
+          include: {
+            _count: { select: { questions: true } }, // Incluimos el conteo de preguntas
           },
         },
       },
-      include: {
-        survey: true, // Incluir los datos completos de la encuesta
-      },
+      orderBy: { createdAt: 'desc' }, // Ordenamos por la fecha de asignación
     });
-    
-    // Como el filtrado se hace en la BD, el mapeo ahora es más seguro.
-    const surveys = assignments.map((assignment) => ({
-      survey: assignment.survey,
-      status: assignment.status,
-      dueDate: assignment.dueDate.toISOString().split('T')[0], // Formatear fecha
-    }));
 
-    res.status(200).json(surveys);
+    // Filtramos en el código para asegurarnos de que solo procesamos asignaciones
+    // que tienen una encuesta válida asociada. Esto previene errores con datos corruptos.
+    const validSurveys = assignments
+      .filter(assignment => assignment.survey) // Ignora asignaciones sin encuesta
+      .map(assignment => ({
+        survey: assignment.survey,
+        status: assignment.status,
+        dueDate: assignment.dueDate,
+      }));
+
+    res.status(200).json(validSurveys);
   } catch (error) {
     console.error('Error al obtener encuestas asignadas:', error);
     res.status(500).json({ message: 'Error interno del servidor.' });
@@ -49,16 +51,29 @@ export const createSurvey = async (req: AuthRequest, res: Response) => {
   const { title, description, startDate, endDate } = req.body;
   const adminId = req.userId; // Obtenemos el ID del admin desde el token
 
+  // --- LOG DE RASTREO #4: VERIFICAR EL USUARIO QUE INTENTA CREAR LA ENCUESTA ---
+  console.log(`\n📝 [createSurvey] Petición para crear encuesta del usuario con ID: ${adminId}`);
+
+  if (!adminId) {
+    return res.status(401).json({ message: 'Usuario no autenticado.' });
+  }
+
   if (!title || !description || !startDate || !endDate) {
     return res.status(400).json({ message: 'Todos los campos son requeridos.' });
   }
 
   try {
+    // Verificamos el rol del usuario aquí, en lugar de en un middleware separado.
+    const adminUser = await prisma.user.findUnique({ where: { id: adminId } });
+    if (!adminUser || adminUser.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Acceso denegado. Se requiere rol de administrador.' });
+    }
+
     const newSurvey = await prisma.survey.create({
       data: {
         title,
         description,
-        // Prisma espera fechas en formato ISO, que es lo que JSON.stringify hace por defecto.
+        // Corregido: Aseguramos que startDate también se guarde.
         startDate: new Date(startDate),
         endDate: new Date(endDate),
       },
@@ -71,6 +86,7 @@ export const createSurvey = async (req: AuthRequest, res: Response) => {
           surveyId: newSurvey.id,
           userId: adminId,
           status: 'PENDING', // O el estado inicial que prefieras
+          createdAt: new Date(), // Aseguramos que el campo siempre se establezca
           dueDate: new Date(endDate), // Usamos la fecha de cierre del formulario
         },
       });
@@ -79,6 +95,56 @@ export const createSurvey = async (req: AuthRequest, res: Response) => {
     res.status(201).json(newSurvey);
   } catch (error) {
     res.status(500).json({ message: 'Error al crear la encuesta.' });
+  }
+};
+
+export const getAllSurveys = async (req: AuthRequest, res: Response) => {
+  const userId = req.userId;
+  const { groupId } = req.query; // Opcional: para verificar asignaciones existentes
+
+  if (!userId) {
+    return res.status(401).json({ message: 'Usuario no autenticado.' });
+  }
+
+  try {
+    let assignedSurveyIds = new Set<string>();
+
+    if (typeof groupId === 'string') {
+      // Si se proporciona un groupId, encontramos las encuestas ya asignadas a sus miembros.
+      const members = await prisma.usersOnGroups.findMany({
+        where: { groupId },
+        select: { userId: true },
+      });
+      const memberIds = members.map(m => m.userId);
+
+      if (memberIds.length > 0) {
+        // Corregimos la consulta para que sea más precisa.
+        const assignments = await prisma.surveyAssignment.findMany({
+          where: {
+            userId: { in: memberIds },
+          },
+          select: { surveyId: true }, // Obtenemos solo el ID de la encuesta asignada
+        });
+        assignedSurveyIds = new Set(assignments.map(a => a.surveyId));
+
+        // --- LOG DE RASTREO: VERIFICAR LAS ENCUESTAS ASIGNADAS DETECTADAS ---
+        console.log(`\n🔍 [getAllSurveys] Verificando asignaciones para el grupo ${groupId}.`);
+        console.log(`   - Miembros del grupo: ${memberIds.length}`);
+        console.log(`   - IDs de encuestas ya asignadas a este grupo:`, Array.from(assignedSurveyIds));
+      }
+    }
+
+    const surveys = await prisma.survey.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Añadimos un campo 'isAssigned' a cada encuesta para el frontend.
+    const surveysWithStatus = surveys.map(survey => ({ ...survey, isAssigned: assignedSurveyIds.has(survey.id) }));
+
+    res.status(200).json(surveysWithStatus);
+  } catch (error) {
+    console.error('Error al obtener todas las encuestas:', error);
+    res.status(500).json({ message: 'Error interno del servidor.' });
   }
 };
 

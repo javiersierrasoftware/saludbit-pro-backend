@@ -15,8 +15,16 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string };
-    req.userId = decoded.id;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+
+    // --- LOG DE RASTREO #1: VER EL PAYLOAD DEL TOKEN DECODIFICADO ---
+    console.log('✅ [auth.middleware] Token decodificado. Payload:', decoded);
+
+    req.userId = decoded.userId;
+
+    // --- LOG DE RASTREO #2: VERIFICAR EL ID AÑADIDO A LA PETICIÓN ---
+    console.log(`   => ID de usuario añadido a la petición (req.userId): ${req.userId}`);
+
     next(); // El token es válido, continuar a la siguiente función (el controlador)
   } catch (error) {
     return res.status(403).json({ message: 'Token inválido o expirado.' });

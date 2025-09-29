@@ -14,6 +14,7 @@ model Institution {
   id    String @id @default(auto()) @map("_id") @db.ObjectId
   name  String @unique
   users User[]
+  groups Group[]
 }
 
 model User {
@@ -33,6 +34,8 @@ model User {
 
   surveyAssignments SurveyAssignment[]
   answers           UserAnswer[]
+  groups            UsersOnGroups[]
+  createdGroups     Group[]            @relation("CreatedGroups")
 }
 
 model Survey {
@@ -51,15 +54,14 @@ model SurveyAssignment {
   id        String           @id @default(auto()) @map("_id") @db.ObjectId
   status    AssignmentStatus @default(PENDING)
   dueDate   DateTime
-  createdAt DateTime         @default(now())
+  createdAt DateTime       @default(now())
   updatedAt DateTime         @updatedAt
 
   user   User   @relation(fields: [userId], references: [id])
   userId String @db.ObjectId
 
-  survey   Survey @relation(fields: [surveyId], references: [id])
+  survey   Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
   surveyId String @db.ObjectId
-  // onDelete: Cascade no es soportado en relaciones many-to-many implícitas o explícitas en MongoDB
 
   @@unique([userId, surveyId])
 }
@@ -72,7 +74,7 @@ model Question {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  survey   Survey @relation(fields: [surveyId], references: [id])
+  survey   Survey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
   surveyId String @db.ObjectId
   answers  UserAnswer[]
 }
@@ -86,8 +88,8 @@ model UserAnswer {
   value      String?  // Para respuestas de texto
   options    String[] // Para respuestas de selección
 
-  question  Question @relation(fields: [questionId], references: [id])
-  user      User     @relation(fields: [userId], references: [id])
+  question  Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -95,10 +97,36 @@ model UserAnswer {
   @@unique([questionId, userId]) // Un usuario solo puede responder una vez a cada pregunta
 }
 
+model Group {
+  id              String          @id @default(auto()) @map("_id") @db.ObjectId
+  name            String
+  description     String?
+  invitationCode  String          @unique
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  creator         User            @relation("CreatedGroups", fields: [creatorId], references: [id])
+  creatorId       String          @db.ObjectId
+  institution     Institution     @relation(fields: [institutionId], references: [id])
+  institutionId   String          @db.ObjectId
+  members         UsersOnGroups[]
+}
+
+model UsersOnGroups {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String   @db.ObjectId
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId   String   @db.ObjectId
+  assignedAt DateTime @default(now())
+  @@unique([userId, groupId])
+}
 
 enum Role {
   ADMIN
   STUDENT
+  TEACHER
+  SUPERVISOR
+  INSTITUTION_ADMIN
 }
 
 enum Status {
@@ -115,5 +143,4 @@ enum QuestionType {
   TEXT
   SINGLE_CHOICE
   MULTIPLE_CHOICE
-  RATING
 }
