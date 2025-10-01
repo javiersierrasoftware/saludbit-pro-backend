@@ -81,28 +81,46 @@ export const getSurveyById = async (req: AuthRequest, res: Response) => {
     return res.status(401).json({ message: 'Usuario no autenticado.' });
   }
 
-  try {
-    // Buscamos la asignación para obtener el estado y la fecha de vencimiento,
-    // pero solo devolveremos un objeto plano y limpio al frontend.
-    const assignment = await prisma.surveyAssignment.findUnique({
-      where: { userId_surveyId: { userId, surveyId } },
-      include: {
-        survey: true, // Incluimos el objeto de la encuesta completo
-      },
-    });
+  console.log(`[getSurveyById] Petición para obtener registro con ID: ${surveyId}`);
 
-    if (!assignment) {
-      return res.status(404).json({ message: 'Registro no encontrado o no asignado.' });
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
-    // Construimos el objeto de respuesta simplificado
-    const surveyResponse = {
-      ...assignment, // Incluye status, dueDate, etc.
-      survey: assignment.survey, // Incluye title, description, etc.
-    };
+    let surveyResponse;
 
+    if (user.role === 'ADMIN' || user.role === 'INSTITUTION_ADMIN') {
+      // Para administradores, buscamos el registro directamente.
+      const survey = await prisma.survey.findUnique({ where: { id: surveyId } });
+      if (!survey) {
+        return res.status(404).json({ message: 'Registro no encontrado.' });
+      }
+      // Creamos un objeto similar a una asignación para mantener la consistencia en el frontend.
+      surveyResponse = {
+        survey,
+        status: 'PENDING', // El estado no es relevante para el admin
+        dueDate: survey.endDate,
+      };
+    } else {
+      // Para estudiantes, buscamos la asignación.
+      const assignment = await prisma.surveyAssignment.findUnique({
+        where: { userId_surveyId: { userId, surveyId } },
+        include: { survey: true },
+      });
+
+      if (!assignment) {
+        console.warn(`[getSurveyById] No se encontró asignación para el usuario ${userId} y registro ${surveyId}`);
+        return res.status(404).json({ message: 'Registro no encontrado o no asignado.' });
+      }
+      surveyResponse = assignment;
+    }
+
+    console.log(`[getSurveyById] Enviando datos del registro: ${JSON.stringify(surveyResponse, null, 2)}`);
     res.status(200).json(surveyResponse);
   } catch (error) {
+    console.error(`[getSurveyById] ¡ERROR! al obtener el registro ${surveyId}:`, error);
     res.status(500).json({ message: 'Error al obtener el registro.' });
   }
 };
@@ -316,6 +334,8 @@ export const getQuestionsForSurvey = async (req: AuthRequest, res: Response) => 
     return res.status(401).json({ message: 'Usuario no autenticado.' });
   }
 
+  console.log(`[getQuestionsForSurvey] Petición para obtener preguntas del registro con ID: ${surveyId}`);
+
   try {
     const questions = await prisma.question.findMany({
       where: {
@@ -328,8 +348,10 @@ export const getQuestionsForSurvey = async (req: AuthRequest, res: Response) => 
     });
 
     // findMany devuelve un array vacío si no encuentra nada, por lo que no es necesario un chequeo de 'not found'.
+    console.log(`[getQuestionsForSurvey] Se encontraron ${questions.length} preguntas.`);
     res.status(200).json(questions);
   } catch (error) {
+    console.error(`[getQuestionsForSurvey] ¡ERROR! al obtener preguntas para el registro ${surveyId}:`, error);
     console.error('Error al obtener las preguntas de la encuesta:', error);
     res.status(500).json({ message: 'Error interno del servidor.' });
   }
