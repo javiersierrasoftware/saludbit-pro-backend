@@ -14,9 +14,6 @@ router.get('/', getAssignedSurveys);
 // Obtener TODAS las encuestas (para selectores de admin) - Debe ir antes de las rutas con :surveyId
 router.get('/all', getAllSurveys);
 
-// Obtener un registro específico por ID
-router.get('/:surveyId', getSurveyById);
-
 // Obtener los resultados de una encuesta (solo para administradores)
 router.get('/:surveyId/results', getSurveyResults);
 
@@ -25,6 +22,9 @@ router.get('/:surveyId/export', exportSurveyResults);
 
 // Añadir una pregunta a una encuesta existente (solo para administradores)
 router.post('/:surveyId/questions', addQuestionToSurvey);
+
+// Obtener las preguntas de una encuesta específica (para cualquier usuario logueado)
+router.get('/:surveyId/questions', getQuestionsForSurvey);
 
 // Obtener una pregunta específica por ID (solo para administradores)
 router.get('/:surveyId/questions/:questionId', getQuestionById);
@@ -47,7 +47,7 @@ router.patch('/:surveyId', updateSurvey);
 // Eliminar una encuesta (solo para administradores)
 router.delete('/:surveyId', deleteSurvey);
 
-// Obtener las preguntas de una encuesta específica (para cualquier usuario logueado)
-router.get('/:surveyId/questions', getQuestionsForSurvey);
+// Obtener un registro específico por ID - Esta es la ruta más genérica, por lo que va al final.
+router.get('/:surveyId', getSurveyById);
 
 export default router;

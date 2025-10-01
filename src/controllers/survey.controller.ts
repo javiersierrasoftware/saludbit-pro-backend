@@ -82,18 +82,26 @@ export const getSurveyById = async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    // Buscamos la asignación para obtener el estado y la fecha de vencimiento
+    // Buscamos la asignación para obtener el estado y la fecha de vencimiento,
+    // pero solo devolveremos un objeto plano y limpio al frontend.
     const assignment = await prisma.surveyAssignment.findUnique({
       where: { userId_surveyId: { userId, surveyId } },
       include: {
-        survey: { include: { _count: { select: { questions: true } } } },
+        survey: true, // Incluimos el objeto de la encuesta completo
       },
     });
 
     if (!assignment) {
       return res.status(404).json({ message: 'Registro no encontrado o no asignado.' });
     }
-    res.status(200).json(assignment);
+
+    // Construimos el objeto de respuesta simplificado
+    const surveyResponse = {
+      ...assignment, // Incluye status, dueDate, etc.
+      survey: assignment.survey, // Incluye title, description, etc.
+    };
+
+    res.status(200).json(surveyResponse);
   } catch (error) {
     res.status(500).json({ message: 'Error al obtener el registro.' });
   }
