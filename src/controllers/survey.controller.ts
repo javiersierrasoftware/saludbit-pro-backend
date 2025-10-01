@@ -14,36 +14,88 @@ export const getAssignedSurveys = async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    // Lógica Original y Correcta: Buscamos las asignaciones del usuario actual.
-    const assignments = await prisma.surveyAssignment.findMany({
-      where: {
-        userId,
-        createdAt: { not: undefined }, // Filtro para ignorar registros con 'createdAt' nulo o ausente.
-      },
-      include: {
-        survey: {
-          include: {
-            _count: { select: { questions: true } }, // Incluimos el conteo de preguntas
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    }
+
+    let surveysToShow;
+
+    if (user.role === 'ADMIN' || user.role === 'INSTITUTION_ADMIN') {
+      // Para administradores, mostramos los registros de su institución (o todos si es super-admin)
+      const whereClause: any = {};
+      if (user.role === 'INSTITUTION_ADMIN') {
+        whereClause.institutionId = user.institutionId;
+      }
+
+      const surveys = await prisma.survey.findMany({
+        where: whereClause,
+        include: { _count: { select: { questions: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // Envolvemos los registros en un formato similar al de una asignación para consistencia en el frontend
+      surveysToShow = surveys.map(survey => ({
+        survey,
+        status: 'PENDING', // El estado no es relevante para el admin en esta vista
+        dueDate: survey.endDate,
+      }));
+    } else {
+      // Para estudiantes, mostramos solo los registros asignados
+      const assignments = await prisma.surveyAssignment.findMany({
+        where: {
+          userId,
+          createdAt: { not: undefined },
+        },
+        include: {
+          survey: {
+            include: {
+              _count: { select: { questions: true } },
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' }, // Ordenamos por la fecha de asignación
-    });
+        orderBy: { createdAt: 'desc' },
+      });
 
-    // Filtramos en el código para asegurarnos de que solo procesamos asignaciones
-    // que tienen una encuesta válida asociada. Esto previene errores con datos corruptos.
-    const validSurveys = assignments
-      .filter(assignment => assignment.survey) // Ignora asignaciones sin encuesta
-      .map(assignment => ({
-        survey: assignment.survey,
-        status: assignment.status,
-        dueDate: assignment.dueDate,
-      }));
+      surveysToShow = assignments
+        .filter(assignment => assignment.survey)
+        .map(assignment => ({
+          survey: assignment.survey,
+          status: assignment.status,
+          dueDate: assignment.dueDate,
+        }));
+    }
 
-    res.status(200).json(validSurveys);
+    res.status(200).json(surveysToShow);
   } catch (error) {
     console.error('Error al obtener encuestas asignadas:', error);
     res.status(500).json({ message: 'Error interno del servidor.' });
+  }
+};
+
+export const getSurveyById = async (req: AuthRequest, res: Response) => {
+  const { surveyId } = req.params;
+  const userId = req.userId;
+
+  if (!userId) {
+    return res.status(401).json({ message: 'Usuario no autenticado.' });
+  }
+
+  try {
+    // Buscamos la asignación para obtener el estado y la fecha de vencimiento
+    const assignment = await prisma.surveyAssignment.findUnique({
+      where: { userId_surveyId: { userId, surveyId } },
+      include: {
+        survey: { include: { _count: { select: { questions: true } } } },
+      },
+    });
+
+    if (!assignment) {
+      return res.status(404).json({ message: 'Registro no encontrado o no asignado.' });
+    }
+    res.status(200).json(assignment);
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener el registro.' });
   }
 };
 
@@ -65,7 +117,7 @@ export const createSurvey = async (req: AuthRequest, res: Response) => {
   try {
     // Verificamos el rol del usuario aquí, en lugar de en un middleware separado.
     const adminUser = await prisma.user.findUnique({ where: { id: adminId } });
-    if (!adminUser || adminUser.role !== 'ADMIN') {
+    if (!adminUser || (adminUser.role !== 'ADMIN' && adminUser.role !== 'INSTITUTION_ADMIN')) {
       return res.status(403).json({ message: 'Acceso denegado. Se requiere rol de administrador.' });
     }
 
@@ -76,6 +128,7 @@ export const createSurvey = async (req: AuthRequest, res: Response) => {
         // Corregido: Aseguramos que startDate también se guarde.
         startDate: new Date(startDate),
         endDate: new Date(endDate),
+        institutionId: adminUser.institutionId, // Asignamos la institución del admin
       },
     });
 
@@ -134,7 +187,16 @@ export const getAllSurveys = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    // Obtenemos el usuario para filtrar por institución si es necesario
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+
+    const whereClause: any = {};
+    if (user?.role === 'INSTITUTION_ADMIN') {
+      whereClause.institutionId = user.institutionId;
+    }
+
     const surveys = await prisma.survey.findMany({
+      where: whereClause, // Aplicamos el filtro por institución
       orderBy: { createdAt: 'desc' },
     });
 

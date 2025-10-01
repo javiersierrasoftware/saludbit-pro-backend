@@ -133,13 +133,32 @@ export const getGroups = async (req: AuthRequest, res: Response) => {
       // Si es admin, devuelve los grupos que ha creado.
       groups = await prisma.group.findMany({
         where: { creatorId: userId },
+        include: {
+          _count: {
+            select: { members: true },
+          },
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
         orderBy: { createdAt: 'desc' },
       });
     } else {
       // Si es estudiante, devuelve los grupos a los que pertenece.
       const userGroups = await prisma.usersOnGroups.findMany({
         where: { userId },
-        include: { group: true },
+        include: {
+          group: {
+            include: { _count: { select: { members: true } } },
+          },
+        },
       });
       groups = userGroups.map(ug => ug.group);
     }

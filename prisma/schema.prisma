@@ -15,6 +15,7 @@ model Institution {
   name  String @unique
   users User[]
   groups Group[]
+  surveys Survey[]
 }
 
 model User {
@@ -29,8 +30,8 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  institution   Institution @relation(fields: [institutionId], references: [id])
-  institutionId String      @db.ObjectId
+  institution   Institution? @relation(fields: [institutionId], references: [id])
+  institutionId String?      @db.ObjectId
 
   surveyAssignments SurveyAssignment[]
   answers           UserAnswer[]
@@ -48,6 +49,9 @@ model Survey {
   updatedAt     DateTime           @updatedAt
   assignments   SurveyAssignment[]
   questions     Question[]
+
+  institution   Institution? @relation(fields: [institutionId], references: [id])
+  institutionId String?      @db.ObjectId
 }
 
 model SurveyAssignment {
@@ -94,7 +98,7 @@ model UserAnswer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([questionId, userId]) // Un usuario solo puede responder una vez a cada pregunta
+  // Se elimina la restricción para permitir múltiples respuestas.
 }
 
 model Group {
@@ -106,8 +110,8 @@ model Group {
   updatedAt       DateTime        @updatedAt
   creator         User            @relation("CreatedGroups", fields: [creatorId], references: [id])
   creatorId       String          @db.ObjectId
-  institution     Institution     @relation(fields: [institutionId], references: [id])
-  institutionId   String          @db.ObjectId
+  institution     Institution?    @relation(fields: [institutionId], references: [id])
+  institutionId   String?         @db.ObjectId
   members         UsersOnGroups[]
 }
 

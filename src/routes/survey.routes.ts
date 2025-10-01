@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { addQuestionToSurvey, createSurvey, deleteSurvey, exportSurveyResults, getAssignedSurveys, getAllSurveys, getQuestionById, getQuestionsForSurvey, getSurveyResults, updateQuestion, updateSurvey } from '../controllers/survey.controller';
+import { addQuestionToSurvey, createSurvey, deleteSurvey, exportSurveyResults, getAssignedSurveys, getAllSurveys, getQuestionById, getQuestionsForSurvey, getSurveyById, getSurveyResults, updateQuestion, updateSurvey } from '../controllers/survey.controller';
 import { submitAnswers } from '../controllers/answer.controller';
 import { assignSurveyToGroup, assignSurveyToInstitution } from '../controllers/assignment.controller';
 
@@ -13,6 +13,9 @@ router.get('/', getAssignedSurveys);
 
 // Obtener TODAS las encuestas (para selectores de admin) - Debe ir antes de las rutas con :surveyId
 router.get('/all', getAllSurveys);
+
+// Obtener un registro específico por ID
+router.get('/:surveyId', getSurveyById);
 
 // Obtener los resultados de una encuesta (solo para administradores)
 router.get('/:surveyId/results', getSurveyResults);
