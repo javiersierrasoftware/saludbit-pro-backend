@@ -36,11 +36,6 @@ export const submitAnswers = async (req: AuthRequest, res: Response) => {
         });
       }
 
-      // 2. Actualizar el estado de la asignación de la encuesta a 'COMPLETED'.
-      await tx.surveyAssignment.update({
-        where: { userId_surveyId: { userId, surveyId } },
-        data: { status: 'COMPLETED' },
-      });
     });
 
     res.status(201).json({ message: 'Encuesta completada exitosamente.' });

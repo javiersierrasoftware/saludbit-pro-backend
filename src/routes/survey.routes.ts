@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { addQuestionToSurvey, createSurvey, deleteSurvey, exportSurveyResults, getAssignedSurveys, getAllSurveys, getQuestionById, getQuestionsForSurvey, getSurveyById, getSurveyResults, updateQuestion, updateSurvey } from '../controllers/survey.controller';
+import { addQuestionToSurvey, createSurvey, deleteQuestion, deleteSurvey, exportSurveyResults, getAssignedSurveys, getAllSurveys, getQuestionById, getQuestionsForSurvey, getSurveyById, getSurveyResults, updateQuestion, updateSurvey } from '../controllers/survey.controller';
 import { submitAnswers } from '../controllers/answer.controller';
 import { assignSurveyToGroup, assignSurveyToInstitution } from '../controllers/assignment.controller';
 
@@ -31,6 +31,9 @@ router.get('/:surveyId/questions/:questionId', getQuestionById);
 
 // Actualizar una pregunta específica (solo para administradores)
 router.patch('/:surveyId/questions/:questionId', updateQuestion);
+
+// Eliminar una pregunta específica (solo para administradores)
+router.delete('/:surveyId/questions/:questionId', deleteQuestion);
 
 // Enviar las respuestas de una encuesta
 router.post('/:surveyId/answers', submitAnswers);

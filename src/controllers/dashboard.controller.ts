@@ -64,17 +64,18 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       stats = { completedSurveys: completedCount, totalSurveys, groupCount };
     } else if (user.role === 'INSTITUTION_ADMIN') {
       // Estadísticas para el Administrador de Institución
-      // 1. Encontrar todos los estudiantes de su institución
       const [institutionStudentAnswers, institutionQuestions, totalSurveys, groupCount] = await prisma.$transaction([
         // Obtener todas las respuestas de los estudiantes de esta institución
         prisma.userAnswer.findMany({
-          where: { user: { institutionId: user.institutionId, role: 'STUDENT' } },
+          where: {
+            user: { institutionId: user.institutionId, role: 'STUDENT' },
+          },
           include: { question: { select: { surveyId: true } } },
         }),
         // Obtener todas las preguntas de las encuestas de esta institución
         prisma.question.findMany({
           where: { survey: { institutionId: user.institutionId } },
-          select: { id: true, surveyId: true }
+          select: { id: true, surveyId: true },
         }),
         // Total de registros creados en su institución
         prisma.survey.count({ where: { institutionId: user.institutionId } }),

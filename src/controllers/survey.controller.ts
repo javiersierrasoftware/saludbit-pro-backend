@@ -42,29 +42,34 @@ export const getAssignedSurveys = async (req: AuthRequest, res: Response) => {
       }));
     } else {
       // Para estudiantes, mostramos solo los registros asignados
-      const assignments = await prisma.surveyAssignment.findMany({
-        where: {
-          userId,
-          createdAt: { not: undefined },
-        },
+      // Usamos una consulta en bruto para filtrar de forma segura las asignaciones huérfanas.
+      const assignmentsWithSurvey = await prisma.surveyAssignment.findMany({
+        where: { userId },
         include: {
           survey: {
-            include: {
-              _count: { select: { questions: true } },
-            },
+            include: { _count: { select: { questions: true } } },
           },
         },
-        orderBy: { createdAt: 'desc' },
       });
 
-      surveysToShow = assignments
-        .filter(assignment => assignment.survey)
-        .map(assignment => ({
-          survey: assignment.survey,
-          status: assignment.status,
-          dueDate: assignment.dueDate,
-        }));
+      // Filtramos en el código los resultados donde la encuesta es nula (huérfanos)
+      const validAssignments = assignmentsWithSurvey.filter(a => a.survey !== null);
+
+      // Ordenamos los resultados válidos por fecha
+      validAssignments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      // Mapeamos al formato esperado por el frontend
+      surveysToShow = validAssignments.map(assignment => ({
+        survey: assignment.survey,
+        status: assignment.status,
+        dueDate: assignment.dueDate,
+      }));
     }
+
+    // --- LOG DE RASTREO: VERIFICAR LA CONSULTA QUE SE ENVÍA AL FRONTEND ---
+    console.log(`[getAssignedSurveys] Enviando ${surveysToShow.length} registros al frontend.`);
+    // Opcional: para ver el detalle completo, descomenta la siguiente línea. Cuidado, puede ser muy largo.
+    // console.log(JSON.stringify(surveysToShow, null, 2));
 
     res.status(200).json(surveysToShow);
   } catch (error) {
@@ -252,7 +257,7 @@ export const addQuestionToSurvey = async (req: AuthRequest, res: Response) => {
   // Validamos que el tipo de pregunta sea uno de los valores permitidos por el enum.
   // Limpiamos espacios en blanco y convertimos a mayúsculas para una validación robusta.
   const upperCaseType = type.trim().toUpperCase();
-  if (!Object.values(QuestionType).includes(upperCaseType as QuestionType)) {
+  if (!Object.values(QuestionType).includes(upperCaseType as QuestionType) && upperCaseType !== 'SEARCHABLE_CHECKLIST') {
     return res.status(400).json({ message: `El tipo de pregunta '${type}' no es válido.` });
   }
 
@@ -302,7 +307,7 @@ export const updateQuestion = async (req: AuthRequest, res: Response) => {
   }
 
   const upperCaseType = type.trim().toUpperCase();
-  if (!Object.values(QuestionType).includes(upperCaseType as QuestionType)) {
+  if (!Object.values(QuestionType).includes(upperCaseType as QuestionType) && upperCaseType !== 'SEARCHABLE_CHECKLIST') {
     return res.status(400).json({ message: `El tipo de pregunta '${type}' no es válido.` });
   }
 
@@ -319,6 +324,39 @@ export const updateQuestion = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Error al actualizar la pregunta:', error);
     res.status(500).json({ message: 'Error al actualizar la pregunta.' });
+  }
+};
+
+export const deleteQuestion = async (req: AuthRequest, res: Response) => {
+  const { surveyId, questionId } = req.params;
+  const userId = req.userId;
+
+  if (!userId) {
+    return res.status(401).json({ message: 'Usuario no autenticado.' });
+  }
+
+  try {
+    // 1. Verificar permisos de administrador
+    const adminUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!adminUser || (adminUser.role !== 'ADMIN' && adminUser.role !== 'INSTITUTION_ADMIN')) {
+      return res.status(403).json({ message: 'Acceso denegado.' });
+    }
+
+    // 2. Verificar que la pregunta pertenece a la encuesta correcta (seguridad extra)
+    const question = await prisma.question.findFirst({
+      where: { id: questionId, surveyId: surveyId },
+    });
+
+    if (!question) {
+      return res.status(404).json({ message: 'Pregunta no encontrada en este registro.' });
+    }
+
+    // 3. Eliminar la pregunta
+    await prisma.question.delete({ where: { id: questionId } });
+
+    res.status(204).send(); // 204 No Content: Éxito, sin contenido que devolver.
+  } catch (error) {
+    res.status(500).json({ message: 'Error al eliminar la pregunta.' });
   }
 };
 

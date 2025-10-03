@@ -88,23 +88,26 @@ export const joinGroup = async (req: AuthRequest, res: Response) => {
     });
 
     // --- NUEVA LÓGICA: Asignar encuestas existentes del grupo al nuevo miembro ---
-    const groupSurveyIds = await getGroupSurveyAssignments(group.id);
+    // 1. Encontrar los registros vinculados directamente al grupo.
+    const surveysOnGroup = await prisma.surveysOnGroups.findMany({
+      where: { groupId: group.id },
+      include: { survey: true },
+    });
 
-    if (groupSurveyIds.length > 0) {
-      const userExistingAssignments = await prisma.surveyAssignment.findMany({
-        where: { userId, surveyId: { in: groupSurveyIds } },
-        select: { surveyId: true },
-      });
-      const userAssignedSurveyIds = new Set(userExistingAssignments.map(a => a.surveyId));
-
-      const surveysToAssign = groupSurveyIds.filter(id => !userAssignedSurveyIds.has(id));
-
-      if (surveysToAssign.length > 0) {
-        const surveysData = await prisma.survey.findMany({ where: { id: { in: surveysToAssign } } });
-        await prisma.surveyAssignment.createMany({
-          data: surveysData.map(survey => ({ userId, surveyId: survey.id, dueDate: survey.endDate, status: 'PENDING', createdAt: new Date() })),
-        });
-      }
+    if (surveysOnGroup.length > 0) {
+      // 2. Asignar esos registros al nuevo miembro usando `upsert` para evitar duplicados.
+      // `skipDuplicates` en `createMany` no es compatible con MongoDB.
+      await prisma.$transaction(
+        surveysOnGroup.map(({ survey }) =>
+          prisma.surveyAssignment.upsert({
+            where: { userId_surveyId: { userId, surveyId: survey.id } },
+            update: {}, // No hacer nada si la asignación ya existe.
+            create: {
+              userId, surveyId: survey.id, dueDate: survey.endDate, status: 'PENDING',
+            },
+          })
+        )
+      );
     }
     // --- FIN DE LA NUEVA LÓGICA ---
 
@@ -129,8 +132,29 @@ export const getGroups = async (req: AuthRequest, res: Response) => {
     }
 
     let groups;
-    if (user.role === 'ADMIN' || user.role === 'INSTITUTION_ADMIN') {
-      // Si es admin, devuelve los grupos que ha creado.
+    if (user.role === 'ADMIN') {
+      // El admin general ve TODOS los grupos de la plataforma.
+      groups = await prisma.group.findMany({
+        // Sin cláusula 'where' para traerlos todos.
+        include: {
+          _count: {
+            select: { members: true },
+          },
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    } else if (user.role === 'INSTITUTION_ADMIN') {
+      // El admin de institución solo ve los grupos que ha creado.
       groups = await prisma.group.findMany({
         where: { creatorId: userId },
         include: {
@@ -212,52 +236,49 @@ export const assignSurveysToGroup = async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    let assignedCount = 0; // Declaramos la variable para contar las asignaciones.
+    await prisma.$transaction(async (tx) => {
+      // 1. Vincular las encuestas al grupo usando `upsert` para evitar duplicados.
+      // `skipDuplicates` en `createMany` no es compatible con MongoDB.
+      await Promise.all(
+        surveyIds.map(surveyId =>
+          tx.surveysOnGroups.upsert({
+            where: { surveyId_groupId: { surveyId, groupId } },
+            update: {}, // No hacer nada si ya existe
+            create: { surveyId, groupId },
+          })
+        )
+      );
 
-    // 1. Encontrar todos los miembros del grupo.
-    const members = await prisma.usersOnGroups.findMany({
-      where: { groupId },
-      select: { userId: true },
-    });
-    const memberIds = members.map(m => m.userId);
-
-    if (memberIds.length === 0) {
-      return res.status(200).json({ message: 'El grupo no tiene miembros para asignar.' });
-    }
-
-    // 2. Para cada encuesta, asignar a los miembros que aún no la tengan.
-    for (const surveyId of surveyIds) {
-      const survey = await prisma.survey.findUnique({ where: { id: surveyId } });
-      if (!survey) continue; // Si la encuesta no existe, la saltamos.
-
-      const existingAssignments = await prisma.surveyAssignment.findMany({
-        where: { surveyId, userId: { in: memberIds } },
+      // 2. Encontrar todos los miembros actuales del grupo.
+      const members = await tx.usersOnGroups.findMany({
+        where: { groupId },
         select: { userId: true },
       });
-      const assignedUserIds = new Set(existingAssignments.map(a => a.userId));
-      const usersToAssign = memberIds.filter(id => !assignedUserIds.has(id));
+      const memberIds = members.map(m => m.userId);
 
-      // --- FIX: Solo llamar createMany si hay usuarios a quienes asignar ---
-      if (usersToAssign.length > 0) {
-        await prisma.surveyAssignment.createMany({
-          data: usersToAssign.map(userId => ({
-            userId,
-            surveyId,
-            dueDate: survey.endDate,
-            status: 'PENDING',
-            createdAt: new Date(), // Aseguramos que el campo siempre se establezca
-          })),
-        });
-        assignedCount += usersToAssign.length;
+      if (memberIds.length === 0) {
+        return; // No hay miembros a quienes asignar, pero el vínculo grupo-encuesta ya se creó.
       }
-    }
 
-    // Mensaje más informativo si no se hicieron nuevas asignaciones
-    if (assignedCount === 0) {
-      res.status(200).json({ message: 'Todas las encuestas seleccionadas ya estaban asignadas a todos los miembros del grupo, o no había nuevos miembros a quienes asignarlas.' });
-    } else {
-      res.status(200).json({ message: `Encuestas asignadas correctamente a ${assignedCount} usuarios.` });
-    }
+      // 3. Para cada encuesta, asignarla a los miembros que aún no la tengan.
+      for (const surveyId of surveyIds) {
+        const survey = await tx.survey.findUnique({ where: { id: surveyId } });
+        if (!survey) continue;
+
+        // Usamos upsert para cada miembro para evitar errores de duplicados.
+        await Promise.all(
+          memberIds.map(userId =>
+            tx.surveyAssignment.upsert({
+              where: { userId_surveyId: { userId, surveyId } },
+              update: {}, // No hacer nada si ya existe
+              create: { userId, surveyId, dueDate: survey.endDate, status: 'PENDING' },
+            })
+          )
+        );
+      }
+    });
+
+    res.status(200).json({ message: 'Registros asignados correctamente al grupo y a sus miembros.' });
   } catch (error) {
     console.error('Error al asignar encuestas al grupo:', error);
     res.status(500).json({ message: 'Error interno del servidor.' });

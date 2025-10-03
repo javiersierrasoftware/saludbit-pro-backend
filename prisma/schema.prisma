@@ -49,6 +49,7 @@ model Survey {
   updatedAt     DateTime           @updatedAt
   assignments   SurveyAssignment[]
   questions     Question[]
+  groups        SurveysOnGroups[] // Nueva relación inversa
 
   institution   Institution? @relation(fields: [institutionId], references: [id])
   institutionId String?      @db.ObjectId
@@ -113,6 +114,7 @@ model Group {
   institution     Institution?    @relation(fields: [institutionId], references: [id])
   institutionId   String?         @db.ObjectId
   members         UsersOnGroups[]
+  surveys         SurveysOnGroups[] // Nueva relación
 }
 
 model UsersOnGroups {
@@ -123,6 +125,18 @@ model UsersOnGroups {
   groupId   String   @db.ObjectId
   assignedAt DateTime @default(now())
   @@unique([userId, groupId])
+}
+
+// Nueva tabla para vincular encuestas a grupos
+model SurveysOnGroups {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  survey    Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  surveyId  String   @db.ObjectId
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId   String   @db.ObjectId
+  assignedAt DateTime @default(now())
+
+  @@unique([surveyId, groupId])
 }
 
 enum Role {
@@ -147,4 +161,5 @@ enum QuestionType {
   TEXT
   SINGLE_CHOICE
   MULTIPLE_CHOICE
+  SEARCHABLE_CHECKLIST // Nuestro nuevo tipo de pregunta
 }
