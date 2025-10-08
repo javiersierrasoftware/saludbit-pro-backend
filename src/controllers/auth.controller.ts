@@ -3,6 +3,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/db';
 import { Role } from '@prisma/client';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 
 export const login = async (req: Request, res: Response) => {
   const { email, password } = req.body;
@@ -30,6 +32,93 @@ export const login = async (req: Request, res: Response) => {
     res.status(200).json({ user: userWithoutPassword, token });
   } catch (error) {
     console.error('Error en el inicio de sesión:', error);
+    res.status(500).json({ message: 'Error interno del servidor.' });
+  }
+};
+
+export const forgotPassword = async (req: Request, res: Response) => {
+  const { email } = req.body;
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      // No revelamos si el usuario existe o no por seguridad
+      return res.status(200).json({ message: 'Si existe una cuenta con este correo, se ha enviado un enlace de recuperación.' });
+    }
+
+    // Generar token
+    const resetToken = crypto.randomBytes(20).toString('hex');
+    const passwordResetToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    const passwordResetExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutos
+
+    await prisma.user.update({
+      where: { email },
+      data: { passwordResetToken, passwordResetExpires },
+    });
+
+    // Enviar correo
+    // Usamos un enlace universal de Expo para máxima compatibilidad.
+    // Reemplaza '96ff1aa2-ec85-4b38-aaec-f847b5fec00f' con tu Project ID de EAS si es diferente.
+    const resetURL = `https://exp.host/@javiersierrasoftware/saludbit-pro/--/reset-password?token=${resetToken}`;
+
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: true, // true para el puerto 465 (SSL), false para otros
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: '"SaludBit Pro" <no-reply@saludbit.com>',
+      to: user.email,
+      subject: 'Recuperación de Contraseña',
+      html: `<p>Has solicitado recuperar tu contraseña. Por favor, haz clic en el siguiente enlace para establecer una nueva:</p><p><a href="${resetURL}">${resetURL}</a></p><p>Si no solicitaste esto, por favor ignora este correo.</p>`,
+    });
+
+    res.status(200).json({ message: 'Si existe una cuenta con este correo, se ha enviado un enlace de recuperación.' });
+  } catch (error) {
+    console.error('Error en forgotPassword:', error);
+    res.status(500).json({ message: 'Error interno del servidor.' });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  const { token, password } = req.body;
+
+  if (!token || !password) {
+    return res.status(400).json({ message: 'Token y nueva contraseña son requeridos.' });
+  }
+
+  try {
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+    const user = await prisma.user.findFirst({
+      where: {
+        passwordResetToken: hashedToken,
+        passwordResetExpires: { gt: new Date() },
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'El token es inválido o ha expirado.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        passwordResetToken: null,
+        passwordResetExpires: null,
+      },
+    });
+
+    res.status(200).json({ message: 'Contraseña actualizada con éxito.' });
+  } catch (error) {
+    console.error('Error en resetPassword:', error);
     res.status(500).json({ message: 'Error interno del servidor.' });
   }
 };
