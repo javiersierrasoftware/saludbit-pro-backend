@@ -61,7 +61,6 @@ export const getAssignedSurveys = async (req: AuthRequest, res: Response) => {
       // Mapeamos al formato esperado por el frontend
       surveysToShow = validAssignments.map(assignment => ({
         survey: assignment.survey,
-        status: assignment.status,
         dueDate: assignment.dueDate,
       }));
     }

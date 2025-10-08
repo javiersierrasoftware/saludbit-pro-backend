@@ -284,3 +284,40 @@ export const assignSurveysToGroup = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ message: 'Error interno del servidor.' });
   }
 };
+
+export const removeMemberFromGroup = async (req: AuthRequest, res: Response) => {
+  const { groupId, memberId } = req.params;
+  const adminId = req.userId;
+
+  if (!adminId) {
+    return res.status(401).json({ message: 'Usuario no autenticado.' });
+  }
+
+  try {
+    // 1. Verificar que el grupo existe y que el usuario es el creador o un super-admin.
+    const group = await prisma.group.findUnique({ where: { id: groupId } });
+    if (!group) {
+      return res.status(404).json({ message: 'Grupo no encontrado.' });
+    }
+
+    const adminUser = await prisma.user.findUnique({ where: { id: adminId } });
+    if (group.creatorId !== adminId && adminUser?.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'No tienes permisos para modificar este grupo.' });
+    }
+
+    // 2. Eliminar la membresía del usuario del grupo.
+    await prisma.usersOnGroups.delete({
+      where: {
+        userId_groupId: {
+          userId: memberId,
+          groupId: groupId,
+        },
+      },
+    });
+
+    res.status(204).send(); // 204 No Content: Éxito, sin contenido que devolver.
+  } catch (error) {
+    console.error('Error al eliminar miembro del grupo:', error);
+    res.status(500).json({ message: 'Error interno del servidor.' });
+  }
+};

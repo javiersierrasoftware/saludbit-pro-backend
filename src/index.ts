@@ -6,6 +6,7 @@ import groupRoutes from './routes/group.routes';
 import institutionRoutes from './routes/institution.routes';
 import userRoutes from './routes/user.routes';
 import dashboardRoutes from './routes/dashboard.routes';
+import reportsRoutes from './routes/reports.routes';
 import { verifyToken } from './middleware/auth.middleware';
 
 dotenv.config();
@@ -32,6 +33,9 @@ app.use('/api/users', verifyToken, userRoutes);
 
 // Rutas protegidas para el dashboard
 app.use('/api/dashboard', verifyToken, dashboardRoutes);
+
+// Rutas protegidas para los reportes
+app.use('/api/reports', verifyToken, reportsRoutes);
 
 app.get('/', (req, res) => {
   res.send('API de SaludBit Pro está funcionando!');

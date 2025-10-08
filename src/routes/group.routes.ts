@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { assignSurveysToGroup, createGroup, deleteGroup, getGroups, joinGroup } from '../controllers/group.controller';
+import { assignSurveysToGroup, createGroup, deleteGroup, getGroups, joinGroup, removeMemberFromGroup } from '../controllers/group.controller';
 
 const router = Router();
 
@@ -11,6 +11,9 @@ router.post('/:groupId/assign-surveys', assignSurveysToGroup);
 
 // Ruta para eliminar un grupo
 router.delete('/:groupId', deleteGroup);
+
+// Ruta para eliminar un miembro de un grupo
+router.delete('/:groupId/members/:memberId', removeMemberFromGroup);
 
 // Ruta para que un usuario se una a un grupo
 router.post('/join', joinGroup);
