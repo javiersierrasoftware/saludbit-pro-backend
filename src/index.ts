@@ -27,11 +27,11 @@ app.use('/api/submissions', submissionRoutes); // ✅ Ruta para envíos
 app.use('/api/dashboard', dashboardRoutes); // ✅ Ruta para el dashboard
 
 // Puerto y conexión
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 mongoose
   .connect(process.env.MONGO_URI || '')
   .then(() => {
     console.log('Conectado a MongoDB');
-    app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
+    app.listen(PORT, '0.0.0.0', () => console.log(`Servidor en puerto ${PORT}`));
   })
   .catch((err) => console.error('Error al conectar DB', err));
