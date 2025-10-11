@@ -16,6 +16,11 @@ const app = express();
 // Middleware para parsear JSON
 app.use(express.json());
 
+// Ruta de bienvenida / Health Check
+app.get('/', (_req, res) => {
+  res.status(200).json({ message: 'API de Saludbit Pro está funcionando correctamente.' });
+});
+
 // Rutas
 app.use('/api/auth', authRoutes);
 app.use('/api/institutions', institutionRoutes);
