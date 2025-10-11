@@ -1,46 +1,37 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import surveyRoutes from './routes/survey.routes';
 import authRoutes from './routes/auth.routes';
-import groupRoutes from './routes/group.routes';
 import institutionRoutes from './routes/institution.routes';
 import userRoutes from './routes/user.routes';
-import dashboardRoutes from './routes/dashboard.routes';
-import reportsRoutes from './routes/reports.routes';
-import { verifyToken } from './middleware/auth.middleware';
+import groupRoutes from './routes/group.routes'; // ✅ Nuevo
+import processRoutes from './routes/process.routes'; // ✅ Nuevo
+import recordRoutes from './routes/record.routes'; // ✅ Nuevo
+import submissionRoutes from './routes/submission.routes'; // ✅ Nuevo
+import dashboardRoutes from './routes/dashboard.routes'; // ✅ Nuevo
 
 dotenv.config();
-
 const app = express();
-const PORT = process.env.PORT || 3000;
 
+// Middleware para parsear JSON
 app.use(express.json());
 
-// Rutas públicas (login y registro)
+// Rutas
 app.use('/api/auth', authRoutes);
+app.use('/api/institutions', institutionRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/groups', groupRoutes); // ✅ Ruta para grupos
+app.use('/api/processes', processRoutes); // ✅ Ruta para procesos
+app.use('/api/records', recordRoutes); // ✅ Ruta para registros
+app.use('/api/submissions', submissionRoutes); // ✅ Ruta para envíos
+app.use('/api/dashboard', dashboardRoutes); // ✅ Ruta para el dashboard
 
-// Rutas protegidas para usuarios (ver encuestas, responder, etc.)
-app.use('/api/surveys', verifyToken, surveyRoutes);
-
-// Rutas protegidas para la gestión de grupos
-app.use('/api/groups', verifyToken, groupRoutes);
-
-// Rutas protegidas para la gestión de instituciones (solo para super-admin)
-app.use('/api/institutions', verifyToken, institutionRoutes);
-
-// Rutas protegidas para la gestión de usuarios (solo para super-admin)
-app.use('/api/users', verifyToken, userRoutes);
-
-// Rutas protegidas para el dashboard
-app.use('/api/dashboard', verifyToken, dashboardRoutes);
-
-// Rutas protegidas para los reportes
-app.use('/api/reports', verifyToken, reportsRoutes);
-
-app.get('/', (req, res) => {
-  res.send('API de SaludBit Pro está funcionando!');
-});
-
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en el puerto ${PORT}`);
-});
+// Puerto y conexión
+const PORT = process.env.PORT || 3000;
+mongoose
+  .connect(process.env.MONGO_URI || '')
+  .then(() => {
+    console.log('Conectado a MongoDB');
+    app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
+  })
+  .catch((err) => console.error('Error al conectar DB', err));

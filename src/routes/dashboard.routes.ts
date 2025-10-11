@@ -1,9 +1,11 @@
 import { Router } from 'express';
-import { getDashboardStats } from '../controllers/dashboard.controller';
+import { authMiddleware } from '../middlewares/auth.middleware';
+import { getStats, getSubmissionsByRecord } from '../controllers/dashboard.controller';
 
 const router = Router();
 
-// Ruta para obtener las estadísticas del dashboard del usuario
-router.get('/stats', getDashboardStats);
+router.use(authMiddleware);
+router.get('/stats', getStats);
+router.get('/submissions-by-record', getSubmissionsByRecord);
 
 export default router;

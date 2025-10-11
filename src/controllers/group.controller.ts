@@ -1,323 +1,173 @@
-import { Response } from 'express';
-import prisma from '../lib/db';
-import { AuthRequest } from '../middleware/auth.middleware';
-import { getGroupSurveyAssignments } from './assignment.controller';
+import { Request, Response } from 'express';
+import { Group } from '../models/group.model';
+import { User } from '../models/user.model';
 
-// Función para generar un código de invitación único y legible
-const generateInvitationCode = (length = 6) => {
-  const prefix = 'PRO-';
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Caracteres legibles, sin 0, O, 1, I
-  let randomPart = '';
-  for (let i = 0; i < length; i++) {
-    randomPart += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return prefix + randomPart;
+// Función auxiliar para generar código aleatorio
+const generateGroupCode = (): string => {
+  const random = Math.floor(100000 + Math.random() * 900000);
+  return `PRO-${random}`;
 };
 
-export const createGroup = async (req: AuthRequest, res: Response) => {
-  const { name, description } = req.body;
-  const creatorId = req.userId;
-
-  // --- LOG DE RASTREO: VERIFICAR LA PETICIÓN PARA CREAR GRUPO ---
-  console.log(`\n📦 [createGroup] Petición para crear grupo del usuario con ID: ${creatorId}`);
-  console.log(`   => Datos recibidos:`, { name, description });
-
-  if (!creatorId) {
-    return res.status(401).json({ message: 'Usuario no autenticado.' });
-  }
-
-  if (!name) {
-    return res.status(400).json({ message: 'El nombre del grupo es requerido.' });
-  }
-
+// Crear un nuevo grupo
+export const createGroup = async (req: Request, res: Response) => {
   try {
-    const admin = await prisma.user.findUnique({ where: { id: creatorId } });
-    if (!admin || (admin.role !== 'ADMIN' && admin.role !== 'INSTITUTION_ADMIN')) {
-      return res.status(403).json({ message: 'No tienes permisos para crear grupos.' });
+    const { name, description, tutor, processIds } = req.body;
+    const userId = (req as any).userId as string;
+
+    if (!name || !userId) {
+      return res.status(400).json({ message: 'Faltan datos requeridos.' });
     }
 
-    // Generar un código único que no exista en la base de datos
-    let invitationCode: string = '';
+    // Generar un código único y verificar que no exista en la BD
+    let code: string;
     let isCodeUnique = false;
-    while (!isCodeUnique) {
-      invitationCode = generateInvitationCode();
-      const existingGroup = await prisma.group.findUnique({ where: { invitationCode } });
+    do {
+      code = generateGroupCode();
+      const existingGroup = await Group.findOne({ code });
       if (!existingGroup) {
         isCodeUnique = true;
       }
-    }
+    } while (!isCodeUnique);
 
-    const newGroup = await prisma.group.create({
-      data: { name, description, invitationCode, creatorId, institutionId: admin.institutionId },
+    const newGroup = new Group({
+      name,
+      description,
+      tutor,
+      code,
+      processes: processIds || [],
+      createdBy: userId,
+      members: [userId], // El creador se agrega como primer miembro
     });
 
-    res.status(201).json(newGroup);
+    const savedGroup = await newGroup.save();
+    // Populamos el campo createdBy para que la respuesta sea consistente
+    await savedGroup.populate('createdBy', 'name _id');
+    await savedGroup.populate('processes', 'name code');
+
+    return res.status(201).json(savedGroup);
   } catch (error) {
-    console.error('Error al crear el grupo:', error);
-    res.status(500).json({ message: 'Error interno del servidor.' });
+    console.error('Error al crear grupo:', error);
+    return res.status(500).json({ message: 'Error del servidor al crear grupo.' });
   }
 };
 
-export const joinGroup = async (req: AuthRequest, res: Response) => {
-  const { invitationCode } = req.body;
-  const userId = req.userId;
-
-  if (!userId) {
-    return res.status(401).json({ message: 'Usuario no autenticado.' });
-  }
-
-  if (!invitationCode) {
-    return res.status(400).json({ message: 'El código de invitación es requerido.' });
-  }
-
+// Obtener todos los grupos
+export const getGroups = async (req: Request, res: Response) => {
   try {
-    const group = await prisma.group.findUnique({
-      where: { invitationCode: invitationCode.trim().toUpperCase() },
-    });
+    const userId = (req as any).userId as string;
+    const user = await User.findById(userId).select('role');
 
-    if (!group) {
-      return res.status(404).json({ message: 'El código de invitación no es válido.' });
-    }
-
-    // Usamos upsert para evitar errores si el usuario ya es miembro.
-    // 'upsert' intenta actualizar, y si no puede, crea un nuevo registro.
-    await prisma.usersOnGroups.upsert({
-      where: { userId_groupId: { userId, groupId: group.id } },
-      update: {}, // No hay nada que actualizar si ya existe.
-      create: { userId, groupId: group.id },
-    });
-
-    // --- NUEVA LÓGICA: Asignar encuestas existentes del grupo al nuevo miembro ---
-    // 1. Encontrar los registros vinculados directamente al grupo.
-    const surveysOnGroup = await prisma.surveysOnGroups.findMany({
-      where: { groupId: group.id },
-      include: { survey: true },
-    });
-
-    if (surveysOnGroup.length > 0) {
-      // 2. Asignar esos registros al nuevo miembro usando `upsert` para evitar duplicados.
-      // `skipDuplicates` en `createMany` no es compatible con MongoDB.
-      await prisma.$transaction(
-        surveysOnGroup.map(({ survey }) =>
-          prisma.surveyAssignment.upsert({
-            where: { userId_surveyId: { userId, surveyId: survey.id } },
-            update: {}, // No hacer nada si la asignación ya existe.
-            create: {
-              userId, surveyId: survey.id, dueDate: survey.endDate, status: 'PENDING',
-            },
-          })
-        )
-      );
-    }
-    // --- FIN DE LA NUEVA LÓGICA ---
-
-    res.status(200).json({ message: `Te has unido al grupo "${group.name}" con éxito.` });
-  } catch (error) {
-    console.error('Error al unirse al grupo:', error);
-    res.status(500).json({ message: 'Error interno del servidor.' });
-  }
-};
-
-export const getGroups = async (req: AuthRequest, res: Response) => {
-  const userId = req.userId;
-
-  if (!userId) {
-    return res.status(401).json({ message: 'Usuario no autenticado.' });
-  }
-
-  try {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
-    let groups;
-    if (user.role === 'ADMIN') {
-      // El admin general ve TODOS los grupos de la plataforma.
-      groups = await prisma.group.findMany({
-        // Sin cláusula 'where' para traerlos todos.
-        include: {
-          _count: {
-            select: { members: true },
-          },
-          members: {
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-    } else if (user.role === 'INSTITUTION_ADMIN') {
-      // El admin de institución solo ve los grupos que ha creado.
-      groups = await prisma.group.findMany({
-        where: { creatorId: userId },
-        include: {
-          _count: {
-            select: { members: true },
-          },
-          members: {
-            include: {
-              user: {
-                select: {
-                  id: true,
-                  name: true,
-                },
-              },
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-    } else {
-      // Si es estudiante, devuelve los grupos a los que pertenece.
-      const userGroups = await prisma.usersOnGroups.findMany({
-        where: { userId },
-        include: {
-          group: {
-            include: { _count: { select: { members: true } } },
-          },
-        },
-      });
-      groups = userGroups.map(ug => ug.group);
-    }
+    const query = user.role === 'STUDENT' ? { members: userId } : {};
 
-    res.status(200).json(groups);
+    const groups = await Group.find(query)
+      .populate('createdBy', 'name email _id') // ✅ Añadido _id para la comprobación en el frontend
+      .populate('processes', 'name code')
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json(groups);
   } catch (error) {
-    console.error('Error al obtener los grupos:', error);
-    res.status(500).json({ message: 'Error interno del servidor.' });
+    console.error('Error al obtener grupos:', error);
+    return res.status(500).json({ message: 'Error del servidor al obtener grupos.' });
   }
 };
 
-export const deleteGroup = async (req: AuthRequest, res: Response) => {
-  const { groupId } = req.params;
-  const userId = req.userId;
-
-  if (!userId) {
-    return res.status(401).json({ message: 'Usuario no autenticado.' });
-  }
-
+// Actualizar un grupo
+export const updateGroup = async (req: Request, res: Response) => {
   try {
-    // 1. Verificar que el grupo existe y que el usuario es el creador.
-    const group = await prisma.group.findUnique({
-      where: { id: groupId },
-    });
+    const { id } = req.params;
+    const { name, tutor, processIds } = req.body;
+    const userId = (req as any).userId as string;
 
+    const group = await Group.findById(id);
     if (!group) {
       return res.status(404).json({ message: 'Grupo no encontrado.' });
     }
 
-    if (group.creatorId !== userId) {
-      return res.status(403).json({ message: 'No tienes permisos para eliminar este grupo.' });
+    if (group.createdBy.toString() !== userId) {
+      return res.status(403).json({ message: 'No autorizado para editar este grupo.' });
     }
 
-    // 2. Eliminar el grupo. Gracias a `onDelete: Cascade` en el schema,
-    // las membresías en `UsersOnGroups` se borrarán automáticamente.
-    await prisma.group.delete({ where: { id: groupId } });
+    group.name = name || group.name;
+    group.tutor = tutor || group.tutor;
+    if (processIds) {
+      group.processes = processIds;
+    }
 
-    res.status(204).send(); // 204 No Content: Éxito, sin contenido que devolver.
+    let updatedGroup = await group.save();
+    // Populamos el campo createdBy para que la respuesta sea consistente
+    await updatedGroup.populate('createdBy', 'name _id');
+    await updatedGroup.populate('processes', 'name code');
+
+    return res.status(200).json(updatedGroup);
   } catch (error) {
-    console.error('Error al eliminar el grupo:', error);
-    res.status(500).json({ message: 'Error interno del servidor.' });
+    console.error('Error al actualizar grupo:', error);
+    return res.status(500).json({ message: 'Error del servidor al actualizar grupo.' });
   }
 };
 
-export const assignSurveysToGroup = async (req: AuthRequest, res: Response) => {
-  const { groupId } = req.params;
-  const { surveyIds } = req.body; // Array de IDs de encuestas
-
-  if (!Array.isArray(surveyIds)) {
-    return res.status(400).json({ message: 'Se requiere un array de IDs de encuestas.' });
-  }
-
+// Eliminar un grupo
+export const deleteGroup = async (req: Request, res: Response) => {
   try {
-    await prisma.$transaction(async (tx) => {
-      // 1. Vincular las encuestas al grupo usando `upsert` para evitar duplicados.
-      // `skipDuplicates` en `createMany` no es compatible con MongoDB.
-      await Promise.all(
-        surveyIds.map(surveyId =>
-          tx.surveysOnGroups.upsert({
-            where: { surveyId_groupId: { surveyId, groupId } },
-            update: {}, // No hacer nada si ya existe
-            create: { surveyId, groupId },
-          })
-        )
-      );
+    const { id } = req.params;
+    const userId = (req as any).userId as string;
 
-      // 2. Encontrar todos los miembros actuales del grupo.
-      const members = await tx.usersOnGroups.findMany({
-        where: { groupId },
-        select: { userId: true },
-      });
-      const memberIds = members.map(m => m.userId);
+    const group = await Group.findById(id);
+    if (!group || group.createdBy.toString() !== userId) {
+      return res.status(403).json({ message: 'No autorizado o grupo no encontrado.' });
+    }
 
-      if (memberIds.length === 0) {
-        return; // No hay miembros a quienes asignar, pero el vínculo grupo-encuesta ya se creó.
-      }
-
-      // 3. Para cada encuesta, asignarla a los miembros que aún no la tengan.
-      for (const surveyId of surveyIds) {
-        const survey = await tx.survey.findUnique({ where: { id: surveyId } });
-        if (!survey) continue;
-
-        // Usamos upsert para cada miembro para evitar errores de duplicados.
-        await Promise.all(
-          memberIds.map(userId =>
-            tx.surveyAssignment.upsert({
-              where: { userId_surveyId: { userId, surveyId } },
-              update: {}, // No hacer nada si ya existe
-              create: { userId, surveyId, dueDate: survey.endDate, status: 'PENDING' },
-            })
-          )
-        );
-      }
-    });
-
-    res.status(200).json({ message: 'Registros asignados correctamente al grupo y a sus miembros.' });
+    await Group.findByIdAndDelete(id);
+    return res.status(200).json({ message: 'Grupo eliminado correctamente.' });
   } catch (error) {
-    console.error('Error al asignar encuestas al grupo:', error);
-    res.status(500).json({ message: 'Error interno del servidor.' });
+    console.error('Error al eliminar grupo:', error);
+    return res.status(500).json({ message: 'Error del servidor al eliminar grupo.' });
   }
 };
 
-export const removeMemberFromGroup = async (req: AuthRequest, res: Response) => {
-  const { groupId, memberId } = req.params;
-  const adminId = req.userId;
-
-  if (!adminId) {
-    return res.status(401).json({ message: 'Usuario no autenticado.' });
-  }
-
+// Unirse a un grupo con un código
+export const joinGroup = async (req: Request, res: Response) => {
   try {
-    // 1. Verificar que el grupo existe y que el usuario es el creador o un super-admin.
-    const group = await prisma.group.findUnique({ where: { id: groupId } });
+    const { code } = req.body;
+    const userId = (req as any).userId as string;
+
+    if (!code) {
+      return res.status(400).json({ message: 'El código del grupo es requerido.' });
+    }
+
+    const group = await Group.findOne({ code: code.toUpperCase() });
     if (!group) {
-      return res.status(404).json({ message: 'Grupo no encontrado.' });
+      return res.status(404).json({ message: 'Grupo no encontrado con ese código.' });
     }
 
-    const adminUser = await prisma.user.findUnique({ where: { id: adminId } });
-    if (group.creatorId !== adminId && adminUser?.role !== 'ADMIN') {
-      return res.status(403).json({ message: 'No tienes permisos para modificar este grupo.' });
+    // Verificar si el usuario ya es miembro
+    if (group.members.includes(userId as any)) {
+      return res.status(400).json({ message: 'Ya eres miembro de este grupo.' });
     }
 
-    // 2. Eliminar la membresía del usuario del grupo.
-    await prisma.usersOnGroups.delete({
-      where: {
-        userId_groupId: {
-          userId: memberId,
-          groupId: groupId,
-        },
-      },
-    });
+    // ✨ Lógica para asignar la institución del creador del grupo al estudiante
+    const groupCreator = await User.findById(group.createdBy).select('institution');
+    if (groupCreator && groupCreator.institution) {
+      const student = await User.findById(userId).populate('institution', 'name');
+      if (student) {
+        student.institution = groupCreator.institution;
+        const updatedStudent = await student.save();
+        group.members.push(userId as any);
+        await group.save();
 
-    res.status(204).send(); // 204 No Content: Éxito, sin contenido que devolver.
+        return res.status(200).json({ message: 'Te has unido al grupo exitosamente.', group, user: updatedStudent });
+      }
+    }
+
+    group.members.push(userId as any);
+    await group.save();
+
+    return res.status(200).json({ message: 'Te has unido al grupo exitosamente.', group, user: await User.findById(userId).populate('institution', 'name') });
   } catch (error) {
-    console.error('Error al eliminar miembro del grupo:', error);
-    res.status(500).json({ message: 'Error interno del servidor.' });
+    console.error('Error al unirse al grupo:', error);
+    return res.status(500).json({ message: 'Error del servidor al unirse al grupo.' });
   }
 };

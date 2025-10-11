@@ -1,114 +1,84 @@
-import { Response } from 'express';
-import prisma from '../lib/db';
-import { AuthRequest } from '../middleware/auth.middleware';
-import { Role } from '@prisma/client';
+import { Request, Response } from 'express';
+import { Institution } from '../models/institution.model';
+import { User } from '../models/user.model';
 
-export const createInstitution = async (req: AuthRequest, res: Response) => {
-  const { name } = req.body;
-
-  if (!name) {
-    return res.status(400).json({ message: 'El nombre de la institución es requerido.' });
-  }
-
+// Crear institución (solo ADMIN)
+export const createInstitution = async (req: Request, res: Response) => {
   try {
-    const existingInstitution = await prisma.institution.findUnique({ where: { name } });
-    if (existingInstitution) {
-      return res.status(409).json({ message: 'Ya existe una institución con este nombre.' });
+    const { name, description } = req.body;
+    const userId = (req as any).userId; // lo seteamos desde el middleware de auth
+
+    const user = await User.findById(userId);
+    if (!user || user.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'No autorizado' });
     }
 
-    const newInstitution = await prisma.institution.create({
-      data: { name },
+    const existing = await Institution.findOne({ name });
+    if (existing) {
+      return res.status(400).json({ message: 'La institución ya existe' });
+    }
+
+    const institution = new Institution({
+      name,
+      description,
+      createdBy: userId,
     });
 
-    res.status(201).json(newInstitution);
+    const savedInstitution = await institution.save();
+
+    // ✨ Asignar la nueva institución al usuario que la creó
+    user.institution = (savedInstitution as any)._id;
+    const updatedUser = await user.save();
+
+    return res.status(201).json({
+      message: 'Institución creada exitosamente',
+      institution: savedInstitution,
+      user: updatedUser, // 🚀 Devolver el usuario actualizado
+    });
   } catch (error) {
-    console.error('Error al crear la institución:', error);
-    res.status(500).json({ message: 'Error interno del servidor.' });
+    console.error('Error al crear institución:', error);
+    return res.status(500).json({ message: 'Error del servidor' });
   }
 };
 
-export const assignAdminsToInstitution = async (req: AuthRequest, res: Response) => {
-  const { institutionId } = req.params;
-  const { adminIds } = req.body; // Array de IDs de usuarios a asignar como admins
-  const superAdminId = req.userId;
-
-  if (!superAdminId) {
-    return res.status(401).json({ message: 'Usuario no autenticado.' });
-  }
-  if (!Array.isArray(adminIds)) {
-    return res.status(400).json({ message: 'Se requiere un array de IDs de administradores.' });
-  }
-
+// Actualizar una institución (solo ADMIN)
+export const updateInstitution = async (req: Request, res: Response) => {
   try {
-    // 1. Verificar que la institución existe.
-    const institution = await prisma.institution.findUnique({ where: { id: institutionId } });
+    const { id } = req.params;
+    const { name, description } = req.body;
+    const userId = (req as any).userId;
+
+    const institution = await Institution.findById(id);
     if (!institution) {
-      return res.status(404).json({ message: 'Institución no encontrada.' });
+      return res.status(404).json({ message: 'Institución no encontrada' });
     }
 
-    // 2. Obtener los administradores actuales de esta institución.
-    const currentAdmins = await prisma.user.findMany({
-      where: {
-        institutionId,
-        role: Role.INSTITUTION_ADMIN,
-      },
-      select: { id: true },
-    });
-    const currentAdminIds = new Set(currentAdmins.map(admin => admin.id));
-
-    // 3. Identificar administradores a añadir y a remover.
-    const newAdminIds = new Set(adminIds);
-
-    const adminsToAdd = Array.from(newAdminIds).filter(id => !currentAdminIds.has(id));
-    const adminsToRemove = Array.from(currentAdminIds).filter(id => !newAdminIds.has(id));
-
-    await prisma.$transaction(async (tx) => {
-      // Asignar nuevos administradores: cambiar su rol y institutionId.
-      if (adminsToAdd.length > 0) {
-        await tx.user.updateMany({
-          where: { id: { in: adminsToAdd } },
-          data: { role: Role.INSTITUTION_ADMIN, institutionId: institution.id },
-        });
+    // Opcional: verificar si el usuario es el creador o un super-admin
+    if (institution.createdBy.toString() !== userId) {
+      const user = await User.findById(userId);
+      if (!user || user.role !== 'ADMIN') {
+        return res.status(403).json({ message: 'No autorizado para editar esta institución' });
       }
+    }
 
-      // Remover administradores: cambiar su rol a STUDENT y limpiar institutionId (o asignar a una por defecto si es necesario).
-      if (adminsToRemove.length > 0) {
-        await tx.user.updateMany({
-          where: { id: { in: adminsToRemove } },
-          data: { role: Role.STUDENT, institutionId: null }, // O asignar a una institución por defecto si es el caso
-        });
-      }
-    });
+    institution.name = name || institution.name;
+    institution.description = description || institution.description;
 
-    res.status(200).json({ message: 'Administradores de institución actualizados correctamente.' });
+    const updatedInstitution = await institution.save();
+    return res.status(200).json(updatedInstitution);
   } catch (error) {
-    console.error('Error al asignar administradores a la institución:', error);
-    res.status(500).json({ message: 'Error interno del servidor.' });
+    console.error('Error al actualizar institución:', error);
+    return res.status(500).json({ message: 'Error del servidor' });
   }
 };
 
-export const getInstitutions = async (req: AuthRequest, res: Response) => {
+// Obtener todas las instituciones
+export const getInstitutions = async (_req: Request, res: Response) => {
   try {
-    const institutions = await prisma.institution.findMany({
-      orderBy: {
-        name: 'asc',
-      },
-      include: {
-        users: {
-          where: {
-            role: 'INSTITUTION_ADMIN',
-          },
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-      },
-    });
-    res.status(200).json(institutions);
+    const institutions = await Institution.find().populate('createdBy', 'name email role');
+    return res.status(200).json(institutions);
   } catch (error) {
-    console.error('Error al obtener las instituciones:', error);
-    res.status(500).json({ message: 'Error interno del servidor.' });
+    console.error('Error al obtener instituciones:', error);
+    return res.status(500).json({ message: 'Error del servidor' });
   }
 };

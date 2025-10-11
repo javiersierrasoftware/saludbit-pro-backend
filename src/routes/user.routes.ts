@@ -1,12 +1,17 @@
 import { Router } from 'express';
-import { getSubmissionHistory, getUsers } from '../controllers/user.controller';
+import {
+  updateInstitution,
+  getUsersByInstitution,
+} from '../controllers/user.controller';
 
 const router = Router();
 
-// Ruta para obtener todos los usuarios (para selectores de admin)
-router.get('/', getUsers);
+// ✅ Actualizar institución de un usuario
+// PUT /api/users/:id/institution
+router.put('/:id/institution', updateInstitution);
 
-// Ruta para obtener el historial de envíos de un estudiante
-router.get('/submission-history', getSubmissionHistory);
+// ✅ Obtener todos los usuarios de una institución
+// GET /api/users/institution/:institutionId
+router.get('/institution/:institutionId', getUsersByInstitution);
 
 export default router;

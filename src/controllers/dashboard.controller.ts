@@ -1,144 +1,146 @@
-import { Response } from 'express';
-import prisma from '../lib/db';
-import { AuthRequest } from '../middleware/auth.middleware';
+import { Request, Response } from 'express';
+import mongoose from 'mongoose';
+import { User } from '../models/user.model';
+import { Group } from '../models/group.model';
+import { Process } from '../models/process.model';
+import { Record } from '../models/record.model';
+import { Submission } from '../models/submission.model';
 
-export const getDashboardStats = async (req: AuthRequest, res: Response) => {
-  const userId = req.userId;
-
-  if (!userId) {
-    return res.status(401).json({ message: 'Usuario no autenticado.' });
-  }
-
+export const getStats = async (req: Request, res: Response) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const userId = (req as any).userId as string;
+    const user = await User.findById(userId).select('role');
+
     if (!user) {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
-    let stats;
+    let stats = {};
 
     if (user.role === 'ADMIN') {
-      // Estadísticas para el Administrador General (sumatoria de todo)
-      const [allStudentAnswers, allQuestions, totalSurveys, groupCount] = await prisma.$transaction([
-        // Obtener todas las respuestas de todos los estudiantes
-        prisma.userAnswer.findMany({
-          where: { user: { role: 'STUDENT' } },
-          include: { question: { select: { surveyId: true } } },
-        }),
-        // Obtener todas las preguntas para calcular el total por encuesta
-        prisma.question.findMany({ select: { id: true, surveyId: true } }),
-        // Total de registros en el sistema
-        prisma.survey.count(), // Total de registros en el sistema
-        // Total de grupos en el sistema
-        prisma.group.count(),
-      ]);
-
-      // Calcular el número de preguntas por cada encuesta
-      const surveyQuestionCounts = new Map<string, number>();
-      allQuestions.forEach(q => {
-        surveyQuestionCounts.set(q.surveyId, (surveyQuestionCounts.get(q.surveyId) || 0) + 1);
-      });
-
-      let completedCount = 0;
-      // Agrupar respuestas por usuario y por encuesta para contar envíos completos
-      const userSurveyAnswerCounts = new Map<string, Map<string, number>>(); // Map<userId, Map<surveyId, answerCount>>
-
-      allStudentAnswers.forEach(answer => {
-        const surveyId = answer.question.surveyId;
-        if (!userSurveyAnswerCounts.has(answer.userId)) {
-          userSurveyAnswerCounts.set(answer.userId, new Map<string, number>());
-        }
-        const surveyAnswers = userSurveyAnswerCounts.get(answer.userId)!;
-        surveyAnswers.set(surveyId, (surveyAnswers.get(surveyId) || 0) + 1);
-      });
-
-      userSurveyAnswerCounts.forEach((surveyAnswers) => {
-        surveyAnswers.forEach((answerCount, surveyId) => {
-          const questionCount = surveyQuestionCounts.get(surveyId) || 0;
-          if (questionCount > 0) {
-            completedCount += Math.floor(answerCount / questionCount);
-          }
-        });
-      });
-
-      stats = { completedSurveys: completedCount, totalSurveys, groupCount };
-    } else if (user.role === 'INSTITUTION_ADMIN') {
-      // Estadísticas para el Administrador de Institución
-      const [institutionStudentAnswers, institutionQuestions, totalSurveys, groupCount] = await prisma.$transaction([
-        // Obtener todas las respuestas de los estudiantes de esta institución
-        prisma.userAnswer.findMany({
-          where: {
-            user: { institutionId: user.institutionId, role: 'STUDENT' },
-          },
-          include: { question: { select: { surveyId: true } } },
-        }),
-        // Obtener todas las preguntas de las encuestas de esta institución
-        prisma.question.findMany({
-          where: { survey: { institutionId: user.institutionId } },
-          select: { id: true, surveyId: true },
-        }),
-        // Total de registros creados en su institución
-        prisma.survey.count({ where: { institutionId: user.institutionId } }),
-        // Grupos creados por este administrador de institución
-        prisma.group.count({ where: { creatorId: userId } }),
-      ]);
-
-      // Calcular el número de preguntas por cada encuesta relevante
-      const surveyQuestionCounts = new Map<string, number>();
-      institutionQuestions.forEach(q => {
-        surveyQuestionCounts.set(q.surveyId, (surveyQuestionCounts.get(q.surveyId) || 0) + 1);
-      });
-
-      let completedCount = 0;
-      const userSurveyAnswerCounts = new Map<string, Map<string, number>>(); // Map<userId, Map<surveyId, answerCount>>
-
-      institutionStudentAnswers.forEach(answer => {
-        const surveyId = answer.question.surveyId;
-        if (!userSurveyAnswerCounts.has(answer.userId)) {
-          userSurveyAnswerCounts.set(answer.userId, new Map<string, number>());
-        }
-        const surveyAnswers = userSurveyAnswerCounts.get(answer.userId)!;
-        surveyAnswers.set(surveyId, (surveyAnswers.get(surveyId) || 0) + 1);
-      });
-
-      userSurveyAnswerCounts.forEach((surveyAnswers) => {
-        surveyAnswers.forEach((answerCount, surveyId) => {
-          const questionCount = surveyQuestionCounts.get(surveyId) || 0;
-          if (questionCount > 0) {
-            completedCount += Math.floor(answerCount / questionCount);
-          }
-        });
-      });
-
-      stats = { completedSurveys: completedCount, totalSurveys, groupCount };
+      const groupsCount = await Group.countDocuments({ createdBy: userId });
+      const processesCount = await Process.countDocuments({ createdBy: userId });
+      const recordsCount = await Record.countDocuments({ createdBy: userId });
+      stats = { groups: groupsCount, processes: processesCount, records: recordsCount };
     } else {
-      // Estadísticas para el Estudiante (lógica original)
-      const [assignments, groups] = await prisma.$transaction([
-        // Total de registros asignados al estudiante
-        prisma.surveyAssignment.findMany({ where: { userId } }),
-        prisma.usersOnGroups.count({
-          where: { userId },
-        }),
-      ]);
-
-      // Contamos cuántas veces se ha respondido cada encuesta asignada.
-      let completedCount = 0;
-      for (const assignment of assignments) {
-        const answerCount = await prisma.userAnswer.count({
-          where: { userId, question: { surveyId: assignment.surveyId } },
-        });
-        const questionCount = await prisma.question.count({ where: { surveyId: assignment.surveyId } });
-        if (questionCount > 0) {
-          completedCount += Math.floor(answerCount / questionCount);
-        }
-      }
-
-      stats = { completedSurveys: completedCount, availableSurveys: assignments.length, groupCount: groups };
+      // Student stats
+      const groupsCount = await Group.countDocuments({ members: userId });
+      const studentGroups = await Group.find({ members: userId }).select('processes');
+      const processIds = [...new Set(studentGroups.flatMap(g => g.processes))];
+      const processesWithRecords = await Process.find({ _id: { $in: processIds } }).select('records');
+      const recordIds = [...new Set(processesWithRecords.flatMap(p => p.records))].filter(id => id);
+      const recordsCount = await Record.countDocuments({ _id: { $in: recordIds } });
+      const submissionsCount = await Submission.countDocuments({ student: userId });
+      stats = { groups: groupsCount, records: recordsCount, submissions: submissionsCount };
     }
 
-    res.status(200).json(stats);
+    return res.status(200).json(stats);
   } catch (error) {
-    console.error('Error al obtener las estadísticas del dashboard:', error);
-    res.status(500).json({ message: 'Error interno del servidor.' });
+    console.error('Error al obtener estadísticas:', error);
+    return res.status(500).json({ message: 'Error del servidor.' });
+  }
+};
+
+const getFilterDates = (filter?: string) => {
+  const now = new Date();
+  let startDate: Date | null = null;
+  let endDate: Date | null = null;
+
+  switch (filter) {
+    case 'day':
+      startDate = new Date(now.setHours(0, 0, 0, 0));
+      break;
+    case 'week':
+      const firstDayOfWeek = now.getDate() - now.getDay();
+      startDate = new Date(now.setDate(firstDayOfWeek));
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    case 'month':
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      break;
+    case 'semester1':
+      startDate = new Date(now.getFullYear(), 0, 1); // Jan 1
+      endDate = new Date(now.getFullYear(), 5, 30, 23, 59, 59, 999); // June 30
+      break;
+    case 'semester2':
+      startDate = new Date(now.getFullYear(), 6, 1); // July 1
+      endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999); // Dec 31
+      break;
+  }
+  return { startDate, endDate };
+};
+
+export const getSubmissionsByRecord = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId as string;
+    const { filter } = req.query;
+    const admin = await User.findById(userId).select('institution');
+
+    console.log(`[Dashboard] Admin ID: ${admin?._id}, Institución: ${admin?.institution || 'Ninguna (Global)'}`);
+
+    const matchQuery: { student?: { $in: mongoose.Types.ObjectId[] } } = {};
+
+    // 1. Si el admin tiene una institución, filtramos por los estudiantes de esa institución
+    if (admin && admin.institution) {
+      const students = await User.find({ institution: admin.institution, role: 'STUDENT' }).select('_id');
+      const studentIds = students.map(s => s._id as mongoose.Types.ObjectId);
+      console.log(`[Dashboard] Estudiantes encontrados en la institución: ${studentIds.length}`);
+      // Si no hay estudiantes en la institución, la gráfica estará vacía, lo cual es correcto.
+      if (studentIds.length === 0) {
+        console.log('[Dashboard] No hay estudiantes, devolviendo array vacío.');
+        return res.status(200).json([]);
+      }
+      matchQuery.student = { $in: studentIds };
+    } else {
+      console.log('[Dashboard] Admin global, buscando en todos los envíos.');
+    }
+
+    const { startDate, endDate } = getFilterDates(filter as string | undefined);
+    let dateMatch = {};
+    if (startDate && endDate) {
+      dateMatch = { createdAt: { $gte: startDate, $lte: endDate } };
+    } else if (startDate) {
+      dateMatch = { createdAt: { $gte: startDate } };
+    }
+
+    // Construir el filtro final correctamente
+    const conditions = [];
+    if (Object.keys(matchQuery).length > 0) conditions.push(matchQuery);
+    if (Object.keys(dateMatch).length > 0) conditions.push(dateMatch);
+
+    const finalMatch = conditions.length > 0 ? { $and: conditions } : {};
+
+    console.log('[Dashboard] Filtro final para la consulta:', JSON.stringify(finalMatch, null, 2));
+
+    const submissionsData = await Submission.aggregate([
+      // 2. Filtrar envíos por estudiantes y/o fecha
+      { $match: finalMatch },
+      { $group: { _id: '$record', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 10 }, // Limitar a los 10 registros más populares
+      {
+        $lookup: {
+          from: 'records', // el nombre de la colección en MongoDB
+          localField: '_id',
+          foreignField: '_id',
+          as: 'recordDetails',
+        },
+      },
+      { $unwind: '$recordDetails' },
+      {
+        $project: {
+          _id: 0,
+          recordName: '$recordDetails.name',
+          count: '$count',
+        },
+      },
+    ]);
+
+    console.log('Datos de la gráfica enviados:', submissionsData);
+
+    return res.status(200).json(submissionsData);
+  } catch (error) {
+    console.error('Error al obtener datos para la gráfica:', error);
+    return res.status(500).json({ message: 'Error del servidor.' });
   }
 };

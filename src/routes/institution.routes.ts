@@ -1,15 +1,18 @@
 import { Router } from 'express';
-import { assignAdminsToInstitution, createInstitution, getInstitutions } from '../controllers/institution.controller';
+import {
+  createInstitution,
+  getInstitutions,
+  updateInstitution,
+} from '../controllers/institution.controller';
+import { authMiddleware } from '../middlewares/auth.middleware';
 
 const router = Router();
 
-// Ruta para crear una nueva institución (solo para admins)
+// Todas las rutas de instituciones requieren autenticación
+router.use(authMiddleware);
+
 router.post('/', createInstitution);
-
-// Ruta para asignar administradores a una institución
-router.patch('/:institutionId/assign-admins', assignAdminsToInstitution);
-
-// Ruta para obtener todas las instituciones
 router.get('/', getInstitutions);
+router.put('/:id', updateInstitution);
 
 export default router;

@@ -1,24 +1,17 @@
 import { Router } from 'express';
-import { assignSurveysToGroup, createGroup, deleteGroup, getGroups, joinGroup, removeMemberFromGroup } from '../controllers/group.controller';
+import { authMiddleware } from '../middlewares/auth.middleware';
+import { createGroup, getGroups, updateGroup, deleteGroup, joinGroup } from '../controllers/group.controller';
 
 const router = Router();
 
-// Ruta para crear un nuevo grupo - La hacemos más específica
-router.post('/create', createGroup);
+// Todas las rutas de grupos requieren autenticación
+router.use(authMiddleware);
 
-// Ruta para asignar encuestas a un grupo
-router.post('/:groupId/assign-surveys', assignSurveysToGroup);
-
-// Ruta para eliminar un grupo
-router.delete('/:groupId', deleteGroup);
-
-// Ruta para eliminar un miembro de un grupo
-router.delete('/:groupId/members/:memberId', removeMemberFromGroup);
-
-// Ruta para que un usuario se una a un grupo
-router.post('/join', joinGroup);
-
-// Ruta para obtener los grupos del usuario - La movemos al final para evitar conflictos
+// Definimos las rutas CRUD y de unión para los grupos
 router.get('/', getGroups);
+router.post('/', createGroup);
+router.post('/join', joinGroup);
+router.put('/:id', updateGroup);
+router.delete('/:id', deleteGroup);
 
 export default router;
