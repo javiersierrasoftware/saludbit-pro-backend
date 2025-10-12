@@ -1,11 +1,17 @@
 import { Request, Response } from 'express';
 import { Process } from '../models/process.model';
+import { User } from '../models/user.model';
 
 // Crear un nuevo proceso
 export const createProcess = async (req: Request, res: Response) => {
   try {
     const { name, type, groupIds, recordIds } = req.body;
     const userId = (req as any).userId;
+
+    const adminUser = await User.findById(userId).select('institution');
+    if (!adminUser || !adminUser.institution) {
+      return res.status(400).json({ message: 'No puedes crear un proceso sin estar asignado a una institución.' });
+    }
 
     if (!name || !type) {
       return res.status(400).json({ message: 'El nombre y el tipo son requeridos.' });
@@ -14,6 +20,7 @@ export const createProcess = async (req: Request, res: Response) => {
     const newProcess = new Process({
       name,
       type,
+      institution: adminUser.institution,
       groups: groupIds || [], // Array de IDs de grupos
       records: recordIds || [],
       createdBy: userId,

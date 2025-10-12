@@ -9,7 +9,7 @@ import { Submission } from '../models/submission.model';
 export const getStats = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId as string;
-    const user = await User.findById(userId).select('role');
+    const user = await User.findById(userId).select('role institution deactivatedGroupIds');
 
     if (!user) {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
@@ -18,18 +18,28 @@ export const getStats = async (req: Request, res: Response) => {
     let stats = {};
 
     if (user.role === 'ADMIN') {
-      const groupsCount = await Group.countDocuments({ createdBy: userId });
-      const processesCount = await Process.countDocuments({ createdBy: userId });
-      const recordsCount = await Record.countDocuments({ createdBy: userId });
-      stats = { groups: groupsCount, processes: processesCount, records: recordsCount };
+      let studentsCount = 0;
+      let groupsCount = 0;
+      let processesCount = 0;
+      let recordsCount = 0;
+      if (user.institution) {
+        studentsCount = await User.countDocuments({ institution: user.institution, role: 'STUDENT' });
+        groupsCount = await Group.countDocuments({ institution: user.institution });
+        processesCount = await Process.countDocuments({ institution: user.institution });
+        recordsCount = await Record.countDocuments({ institution: user.institution });
+      }
+      stats = { students: studentsCount, groups: groupsCount, processes: processesCount, records: recordsCount };
     } else {
       // Student stats
-      const groupsCount = await Group.countDocuments({ members: userId });
-      const studentGroups = await Group.find({ members: userId }).select('processes');
+      const deactivatedGroupIds = user.deactivatedGroupIds || [];
+      const activeGroupsQuery = { members: userId, _id: { $nin: deactivatedGroupIds } };
+
+      const groupsCount = await Group.countDocuments({ members: userId }); // Total de grupos a los que pertenece
+      const studentGroups = await Group.find(activeGroupsQuery).select('processes');
       const processIds = [...new Set(studentGroups.flatMap(g => g.processes))];
       const processesWithRecords = await Process.find({ _id: { $in: processIds } }).select('records');
       const recordIds = [...new Set(processesWithRecords.flatMap(p => p.records))].filter(id => id);
-      const recordsCount = await Record.countDocuments({ _id: { $in: recordIds } });
+      const recordsCount = recordIds.length; // Contamos las asignaciones únicas de registros activos
       const submissionsCount = await Submission.countDocuments({ student: userId });
       stats = { groups: groupsCount, records: recordsCount, submissions: submissionsCount };
     }

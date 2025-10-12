@@ -30,6 +30,7 @@ export const register = async (req: Request, res: Response) => {
         phone: savedUser.phone,
         institution: savedUser.institution, // Ahora será un objeto { _id: ..., name: ... } o null
         status: savedUser.status,
+        deactivatedGroupIds: savedUser.deactivatedGroupIds,
       },
     });
   } catch (err) {
@@ -67,6 +68,7 @@ export const login = async (req: Request, res: Response) => {
         phone: user.phone,
         institution: user.institution, // Ahora será un objeto { _id: ..., name: ... } o null
         status: user.status,
+        deactivatedGroupIds: user.deactivatedGroupIds,
       },
     });
   } catch (err) {

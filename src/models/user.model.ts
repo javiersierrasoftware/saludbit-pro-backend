@@ -1,40 +1,46 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Types } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 export interface IUser extends Document {
   name: string;
   email: string;
-  password: string;
-  role: string;
+  password?: string;
+  role: 'ADMIN' | 'STUDENT';
   document?: string;
   phone?: string;
-  institution?: mongoose.Types.ObjectId; // referencia a Institution
-  status?: string;
-  comparePassword(candidatePassword: string): Promise<boolean>;
+  institution?: Types.ObjectId;
+  status: 'Activo' | 'Inactivo';
+  deactivatedGroupIds?: Types.ObjectId[]; // <-- CAMBIO IMPORTANTE
+  comparePassword(password: string): Promise<boolean>;
 }
 
-const UserSchema: Schema = new Schema<IUser>({
+const userSchema = new Schema<IUser>({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  role: { type: String, default: 'STUDENT' },
-  document: { type: String, default: '' },
-  phone: { type: String, default: '' },
-  institution: { type: Schema.Types.ObjectId, ref: 'Institution', default: null }, // referencia
-  status: { type: String, default: 'Activo' },
-});
+  password: { type: String, required: true, select: false }, // Ocultar por defecto
+  role: { type: String, enum: ['ADMIN', 'STUDENT'], default: 'STUDENT' },
+  document: { type: String },
+  phone: { type: String },
+  institution: { type: Schema.Types.ObjectId, ref: 'Institution', default: null },
+  status: { type: String, enum: ['Activo', 'Inactivo'], default: 'Activo' },
+  deactivatedGroupIds: [{ type: Schema.Types.ObjectId, ref: 'Group' }], // <-- CAMBIO IMPORTANTE
+}, { timestamps: true });
 
-// Hashea la contraseña antes de guardar
-UserSchema.pre<IUser>('save', async function (next) {
-  if (!this.isModified('password')) return next();
+// Middleware para encriptar la contraseña antes de guardar
+userSchema.pre('save', async function (next) {
+  if (!this.isModified('password') || !this.password) {
+    return next();
+  }
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
 });
 
-// Compara la contraseña al hacer login
-UserSchema.methods.comparePassword = function (candidatePassword: string) {
-  return bcrypt.compare(candidatePassword, this.password);
+// Método para comparar contraseñas
+userSchema.methods.comparePassword = async function (password: string): Promise<boolean> {
+  const user = await User.findOne({ _id: this._id }).select('password');
+  if (!user || !user.password) return false;
+  return bcrypt.compare(password, user.password);
 };
 
-export const User = mongoose.model<IUser>('User', UserSchema);
+export const User = mongoose.model<IUser>('User', userSchema);

@@ -7,6 +7,6 @@ const router = Router();
 router.use(authMiddleware);
 
 router.post('/', createSubmission);
-router.get('/history/:recordId', getSubmissionHistory);
+router.get('/history', getSubmissionHistory);
 
 export default router;

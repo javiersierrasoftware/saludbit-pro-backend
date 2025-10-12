@@ -19,6 +19,7 @@ export interface IRecord extends Document {
     type: 'text' | 'single' | 'multiple';
     options: string[];
   }[];
+  institution: mongoose.Types.ObjectId;
   createdBy: mongoose.Types.ObjectId;
 }
 
@@ -28,6 +29,7 @@ const RecordSchema: Schema<IRecord> = new Schema<IRecord>(
     name: { type: String, required: true, trim: true },
     questions: [QuestionSchema],
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    institution: { type: Schema.Types.ObjectId, ref: 'Institution', required: true },
   },
   { timestamps: true }
 );

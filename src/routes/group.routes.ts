@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware';
-import { createGroup, getGroups, updateGroup, deleteGroup, joinGroup } from '../controllers/group.controller';
+import { createGroup, getGroups, updateGroup, deleteGroup, joinGroup, leaveGroup } from '../controllers/group.controller';
 
 const router = Router();
 
@@ -13,5 +13,6 @@ router.post('/', createGroup);
 router.post('/join', joinGroup);
 router.put('/:id', updateGroup);
 router.delete('/:id', deleteGroup);
+router.post('/leave/:id', leaveGroup);
 
 export default router;

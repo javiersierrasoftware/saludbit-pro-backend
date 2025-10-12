@@ -10,6 +10,8 @@ const AnswerSchema: Schema = new Schema(
 
 export interface ISubmission extends Document {
   record: mongoose.Types.ObjectId;
+  group: mongoose.Types.ObjectId;
+  process: mongoose.Types.ObjectId;
   student: mongoose.Types.ObjectId;
   answers: { questionIndex: number; answer: any }[];
 }
@@ -17,6 +19,8 @@ export interface ISubmission extends Document {
 const SubmissionSchema: Schema<ISubmission> = new Schema<ISubmission>(
   {
     record: { type: Schema.Types.ObjectId, ref: 'Record', required: true },
+    group: { type: Schema.Types.ObjectId, ref: 'Group', required: true },
+    process: { type: Schema.Types.ObjectId, ref: 'Process', required: true },
     student: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     answers: [AnswerSchema],
   },

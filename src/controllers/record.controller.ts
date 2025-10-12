@@ -1,84 +1,83 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
+import { Group } from '../models/group.model';
 import { Record } from '../models/record.model';
 import { User } from '../models/user.model';
-import { Group } from '../models/group.model';
-import { Process } from '../models/process.model';
 
-// Create a new record (form template)
+/**
+ * Crea un nuevo registro.
+ */
 export const createRecord = async (req: Request, res: Response) => {
   try {
     const { name, questions } = req.body;
     const userId = (req as any).userId;
 
-    if (!name || !questions || questions.length === 0) {
-      return res.status(400).json({ message: 'Nombre y al menos una pregunta son requeridos.' });
+    const adminUser = await User.findById(userId).select('institution');
+    if (!adminUser || !adminUser.institution) {
+      return res.status(400).json({ message: 'No puedes crear un registro sin estar asignado a una institución.' });
+    }
+
+    if (!name || !questions || !Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ message: 'El nombre y al menos una pregunta son requeridos.' });
     }
 
     const newRecord = new Record({
       name,
       questions,
+      institution: adminUser.institution,
       createdBy: userId,
     });
 
-    let savedRecord = await newRecord.save();
-    savedRecord = await savedRecord.populate('createdBy', '_id');
+    const savedRecord = await newRecord.save();
     return res.status(201).json(savedRecord);
   } catch (error) {
-    console.error('Error al crear registro:', error);
     return res.status(500).json({ message: 'Error del servidor al crear el registro.' });
   }
 };
 
-// Get all records
-export const getRecords = async (_req: Request, res: Response) => {
-  const req = _req as Request; // Type assertion to access userId
+/**
+ * Obtiene todos los registros.
+ * En el futuro, se podría filtrar para que un ADMIN solo vea los que ha creado.
+ */
+export const getRecords = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).userId as string;
-    const user = await User.findById(userId).select('role');
+    const userId = (req as any).userId;
+    const user = await User.findById(userId).select('institution');
 
-    if (!user) {
-      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    if (!user || !user.institution) {
+      return res.status(200).json([]); // Si no tiene institución, no ve registros.
     }
 
-    if (user.role === 'ADMIN') {
-      // Admin gets all records they created
-      const records = await Record.find({ createdBy: userId })
-        .populate('createdBy', '_id')
-        .sort({ createdAt: -1 });
-      return res.status(200).json(records);
-    } else {
-      // Student gets records from their groups -> processes
-      // 1. Find groups the student is in
-      const studentGroups = await Group.find({ members: userId }).select('processes');
-      if (studentGroups.length === 0) {
-        return res.status(200).json([]);
-      }
-
-      // 2. Get all unique process IDs from those groups
-      const processIds = [...new Set(studentGroups.flatMap(g => g.processes))];
-
-      // 3. Find all processes with those IDs
-      const processesWithRecords = await Process.find({ _id: { $in: processIds } }).select('records');
-      if (processesWithRecords.length === 0) {
-        return res.status(200).json([]);
-      }
-
-      // 4. Get all unique record IDs from those processes
-      const recordIds = [...new Set(processesWithRecords.flatMap(p => p.records))];
-
-      // 5. Find all records with those IDs
-      const records = await Record.find({ _id: { $in: recordIds } })
-        .sort({ createdAt: -1 });
-
-      return res.status(200).json(records);
-    }
+    const records = await Record.find({ institution: user.institution })
+      .populate('createdBy', 'name _id')
+      .sort({ createdAt: -1 });
+    return res.status(200).json(records);
   } catch (error) {
     console.error('Error al obtener registros:', error);
     return res.status(500).json({ message: 'Error del servidor al obtener registros.' });
   }
 };
 
-// Update a record
+/**
+ * Obtiene un registro específico por su ID.
+ */
+export const getRecordById = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const record = await Record.findById(id);
+    if (!record) {
+      return res.status(404).json({ message: 'Registro no encontrado.' });
+    }
+    return res.status(200).json(record);
+  } catch (error) {
+    console.error('Error al obtener registro por ID:', error);
+    return res.status(500).json({ message: 'Error del servidor al obtener el registro.' });
+  }
+};
+
+/**
+ * Actualiza un registro existente.
+ */
 export const updateRecord = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -97,40 +96,73 @@ export const updateRecord = async (req: Request, res: Response) => {
     record.name = name || record.name;
     record.questions = questions || record.questions;
 
-    let updatedRecord = await record.save();
-    updatedRecord = await updatedRecord.populate('createdBy', '_id');
+    const updatedRecord = await record.save();
     return res.status(200).json(updatedRecord);
   } catch (error) {
-    console.error('Error al actualizar registro:', error);
-    return res.status(500).json({ message: 'Error del servidor al actualizar registro.' });
+    return res.status(500).json({ message: 'Error del servidor al actualizar el registro.' });
   }
 };
 
-// Delete a record
+/**
+ * Elimina un registro.
+ */
 export const deleteRecord = async (req: Request, res: Response) => {
   try {
-    const record = await Record.findById(req.params.id);
-    if (!record || record.createdBy.toString() !== (req as any).userId) {
-      return res.status(403).json({ message: 'No autorizado o registro no encontrado.' });
-    }
     await Record.findByIdAndDelete(req.params.id);
     return res.status(200).json({ message: 'Registro eliminado correctamente.' });
   } catch (error) {
-    console.error('Error al eliminar registro:', error);
-    return res.status(500).json({ message: 'Error del servidor al eliminar registro.' });
+    return res.status(500).json({ message: 'Error del servidor al eliminar el registro.' });
   }
 };
 
-// Get a single record by ID
-export const getRecordById = async (req: Request, res: Response) => {
+/**
+ * Obtiene las "asignaciones" de registros para un estudiante.
+ * Una asignación es un registro que debe ser completado en el contexto de un grupo y un proceso.
+ */
+export const getStudentAssignments = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const record = await Record.findById(id);
-    if (!record) {
-      return res.status(404).json({ message: 'Registro no encontrado.' });
+    const userId = (req as any).userId;
+    const user = await User.findById(userId).select('deactivatedGroupIds');
+
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
-    return res.status(200).json(record);
+
+    const deactivatedGroupIds = user.deactivatedGroupIds?.map(id => id.toString()) || [];
+
+    // 1. Encontrar todos los grupos a los que pertenece el estudiante.
+    //    Poblamos en cascada: Grupo -> Procesos -> Registros
+    const userGroups = await Group.find({ members: userId })
+      .populate({
+        path: 'processes',
+        populate: {
+          path: 'records',
+          model: 'Record',
+        },
+      })
+      .select('name processes'); // Seleccionamos solo los campos necesarios
+
+    // 2. Transformar los datos en una lista plana de "asignaciones"
+    const assignments: any[] = [];
+    userGroups.forEach((group: any) => {
+      const isActive = !deactivatedGroupIds.includes(group._id.toString());
+
+      group.processes.forEach((process: any) => {
+        process.records.forEach((record: any) => {
+          assignments.push({
+            _id: `${group._id}-${process._id}-${record._id}`, // ID único para la asignación
+            group: { _id: group._id, name: group.name },
+            process: { _id: process._id, name: process.name },
+            record: record.toObject(), // Convertimos el documento de Mongoose a un objeto plano
+            isActive, // Añadimos el estado de actividad
+          });
+        });
+      });
+    });
+
+    return res.status(200).json(assignments);
   } catch (error) {
-    return res.status(500).json({ message: 'Error del servidor al obtener el registro.' });
+    console.error('Error al obtener asignaciones del estudiante:', error);
+    return res.status(500).json({ message: 'Error del servidor al obtener asignaciones.' });
   }
 };

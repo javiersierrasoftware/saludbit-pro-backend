@@ -6,6 +6,7 @@ export interface IProcess extends Document {
   type: 'Valoración' | 'Procedimiento';
   groups: mongoose.Types.ObjectId[];
   records: mongoose.Types.ObjectId[];
+  institution: mongoose.Types.ObjectId;
   createdBy: mongoose.Types.ObjectId;
   code: number;
 }
@@ -21,6 +22,7 @@ const ProcessSchema: Schema<IProcess> = new Schema<IProcess>(
     },
     groups: [{ type: Schema.Types.ObjectId, ref: 'Group' }],
     records: [{ type: Schema.Types.ObjectId, ref: 'Record' }],
+    institution: { type: Schema.Types.ObjectId, ref: 'Institution', required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true }

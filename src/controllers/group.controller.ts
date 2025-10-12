@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { Types } from 'mongoose';
 import { Group } from '../models/group.model';
 import { User } from '../models/user.model';
 
@@ -13,6 +14,11 @@ export const createGroup = async (req: Request, res: Response) => {
   try {
     const { name, description, tutor, processIds } = req.body;
     const userId = (req as any).userId as string;
+
+    const adminUser = await User.findById(userId).select('institution');
+    if (!adminUser || !adminUser.institution) {
+      return res.status(400).json({ message: 'No puedes crear un grupo sin estar asignado a una institución.' });
+    }
 
     if (!name || !userId) {
       return res.status(400).json({ message: 'Faltan datos requeridos.' });
@@ -34,6 +40,7 @@ export const createGroup = async (req: Request, res: Response) => {
       description,
       tutor,
       code,
+      institution: adminUser.institution,
       processes: processIds || [],
       createdBy: userId,
       members: [userId], // El creador se agrega como primer miembro
@@ -55,13 +62,18 @@ export const createGroup = async (req: Request, res: Response) => {
 export const getGroups = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId as string;
-    const user = await User.findById(userId).select('role');
+    const user = await User.findById(userId).select('role institution');
 
     if (!user) {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
-    const query = user.role === 'STUDENT' ? { members: userId } : {};
+    let query: any = {};
+    if (user.role === 'STUDENT') {
+      query = { members: userId };
+    } else if (user.role === 'ADMIN' && user.institution) {
+      query = { institution: user.institution };
+    }
 
     const groups = await Group.find(query)
       .populate('createdBy', 'name email _id') // ✅ Añadido _id para la comprobación en el frontend
@@ -144,6 +156,13 @@ export const joinGroup = async (req: Request, res: Response) => {
     }
 
     // Verificar si el usuario ya es miembro
+    const studentToUpdate = await User.findById(userId).select('deactivatedGroupIds');
+    if (studentToUpdate && studentToUpdate.deactivatedGroupIds?.some((id: Types.ObjectId) => id.equals(group._id as Types.ObjectId))) {
+      studentToUpdate.deactivatedGroupIds = studentToUpdate.deactivatedGroupIds.filter((id: Types.ObjectId) => !id.equals(group._id as Types.ObjectId));
+      await studentToUpdate.save();
+      return res.status(200).json({ message: 'Has reactivado el grupo.', group, user: studentToUpdate });
+    }
+
     if (group.members.includes(userId as any)) {
       return res.status(400).json({ message: 'Ya eres miembro de este grupo.' });
     }
@@ -154,20 +173,47 @@ export const joinGroup = async (req: Request, res: Response) => {
       const student = await User.findById(userId).populate('institution', 'name');
       if (student) {
         student.institution = groupCreator.institution;
-        const updatedStudent = await student.save();
-        group.members.push(userId as any);
-        await group.save();
-
-        return res.status(200).json({ message: 'Te has unido al grupo exitosamente.', group, user: updatedStudent });
+        await student.save();
       }
     }
 
+    // Añadimos al estudiante a la lista de miembros y guardamos el grupo.
     group.members.push(userId as any);
     await group.save();
 
-    return res.status(200).json({ message: 'Te has unido al grupo exitosamente.', group, user: await User.findById(userId).populate('institution', 'name') });
+    return res.status(200).json({ message: 'Te has unido al grupo exitosamente.', group, user: await User.findById(userId).populate('institution', 'name') }); // Devolvemos el usuario actualizado
   } catch (error) {
     console.error('Error al unirse al grupo:', error);
     return res.status(500).json({ message: 'Error del servidor al unirse al grupo.' });
+  }
+};
+
+// Abandonar un grupo
+export const leaveGroup = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params; // ID del grupo
+    const userId = (req as any).userId as string;
+
+    const group = await Group.findById(id);
+    if (!group) {
+      return res.status(404).json({ message: 'Grupo no encontrado.' });
+    }
+
+    // Regla: El creador no puede abandonar su propio grupo, solo eliminarlo.
+    if (group.createdBy.toString() === userId) {
+      return res.status(400).json({ message: 'El creador no puede abandonar el grupo. Solo puede eliminarlo.' });
+    }
+
+    if (!group.members.map(id => id.toString()).includes(userId)) {
+      return res.status(400).json({ message: 'No eres miembro de este grupo.' });
+    }
+
+    // En lugar de eliminarlo, lo añadimos a la lista de grupos desactivados del usuario.
+    await User.findByIdAndUpdate(userId, { $addToSet: { deactivatedGroupIds: id } });
+
+    return res.status(200).json({ message: 'Has desactivado el grupo correctamente.' });
+  } catch (error) {
+    console.error('Error al abandonar el grupo:', error);
+    return res.status(500).json({ message: 'Error del servidor al abandonar el grupo.' });
   }
 };
