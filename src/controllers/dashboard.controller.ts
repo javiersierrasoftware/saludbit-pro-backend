@@ -22,13 +22,18 @@ export const getStats = async (req: Request, res: Response) => {
       let groupsCount = 0;
       let processesCount = 0;
       let recordsCount = 0;
+      let submissionsCount = 0;
       if (user.institution) {
-        studentsCount = await User.countDocuments({ institution: user.institution, role: 'STUDENT' });
+        const students = await User.find({ institution: user.institution, role: 'STUDENT' }).select('_id');
+        const studentIds = students.map(s => s._id);
+
+        studentsCount = studentIds.length;
         groupsCount = await Group.countDocuments({ institution: user.institution });
         processesCount = await Process.countDocuments({ institution: user.institution });
         recordsCount = await Record.countDocuments({ institution: user.institution });
+        submissionsCount = await Submission.countDocuments({ student: { $in: studentIds } });
       }
-      stats = { students: studentsCount, groups: groupsCount, processes: processesCount, records: recordsCount };
+      stats = { students: studentsCount, groups: groupsCount, processes: processesCount, records: recordsCount, submissions: submissionsCount };
     } else {
       // Student stats
       const deactivatedGroupIds = user.deactivatedGroupIds || [];
@@ -429,7 +434,7 @@ export const getInstitutionSummary = async (req: Request, res: Response) => {
                       ]);
                       analysis = textAnswers.map(a => a.answer);
                     }
-                    return { ...question, analysis: analysis || [] };
+                    return { ...question, analysis: analysis || [] }; // Asegura que analysis siempre sea un array
                   })
                 );
                 return { ...record, questions };
@@ -445,6 +450,117 @@ export const getInstitutionSummary = async (req: Request, res: Response) => {
     return res.status(200).json(summary);
   } catch (error) {
     console.error('Error al obtener resumen de la institución:', error);
+    return res.status(500).json({ message: 'Error del servidor.' });
+  }
+};
+
+export const getRecordAnalysis = async (req: Request, res: Response) => {
+  try {
+    const { recordId } = req.params;
+    const { groupId, processId } = req.query;
+    const adminId = (req as any).userId;
+
+    const admin = await User.findById(adminId).select('institution').populate('institution', 'name');
+    if (!admin || !admin.institution) {
+      return res.status(400).json({ message: 'Admin no asignado a una institución.' });
+    }
+
+    const record = await Record.findById(recordId).lean();
+    if (!record) {
+      return res.status(404).json({ message: 'Registro no encontrado.' });
+    }
+
+    // Find all students in the admin's institution
+    const students = await User.find({ institution: admin.institution, role: 'STUDENT' }).select('_id');
+    const studentIds = students.map(s => s._id);
+
+    if (studentIds.length === 0) {
+      // Si no hay estudiantes, devuelve el registro con análisis vacíos
+      const questionsWithEmptyAnalysis = (record.questions as any[]).map(q => ({ ...q, analysis: [] }));
+      return res.status(200).json({
+        ...record,
+        questions: questionsWithEmptyAnalysis,
+        summary: {
+          institutionName: (admin.institution as any).name,
+          totalSubmissions: 0,
+        },
+        filters: {
+          availableGroups: [],
+          availableProcesses: [],
+        },
+      });
+    }
+
+    const questions = await Promise.all(
+      (record.questions as any[]).map(async (question, index) => {
+        let analysis;
+        const matchConditions: any = {
+          record: record._id,
+          student: { $in: studentIds },
+          'answers.questionIndex': index,
+        };
+        if (groupId) matchConditions.group = new mongoose.Types.ObjectId(groupId as string);
+        if (processId) matchConditions.process = new mongoose.Types.ObjectId(processId as string);
+
+        if (question.type === 'single' || question.type === 'multiple') {
+          analysis = await Submission.aggregate([
+            { $match: matchConditions },
+            { $unwind: '$answers' },
+            { $match: { 'answers.questionIndex': index } },
+            { $unwind: '$answers.answer' },
+            { $group: { _id: '$answers.answer', count: { $sum: 1 } } },
+            { $project: { name: '$_id', count: 1, _id: 0 } },
+            { $sort: { count: -1 } },
+          ]);
+        } else {
+          const textAnswers = await Submission.aggregate([
+            { $match: matchConditions },
+            { $unwind: '$answers' },
+            { $match: { 'answers.questionIndex': index } },
+            { $sort: { createdAt: -1 } },
+            { $limit: 10 }, // Últimas 10 respuestas
+            { $project: { answer: '$answers.answer', _id: 0 } },
+          ]);
+          analysis = textAnswers.map(a => a.answer);
+        }
+        return { ...question, analysis: analysis || [] };
+      })
+    );
+
+    // Construir el filtro para el conteo total
+    const totalSubmissionsMatch: any = {
+      record: new mongoose.Types.ObjectId(recordId),
+      student: { $in: studentIds },
+    };
+    if (groupId) totalSubmissionsMatch.group = new mongoose.Types.ObjectId(groupId as string);
+    if (processId) totalSubmissionsMatch.process = new mongoose.Types.ObjectId(processId as string);
+
+    // Contar el total de envíos para este registro en la institución
+    const totalSubmissions = await Submission.countDocuments(totalSubmissionsMatch);
+
+    // Obtener los grupos y procesos disponibles para los filtros
+    const submissionsForContext = await Submission.find({
+      record: new mongoose.Types.ObjectId(recordId),
+      student: { $in: studentIds },
+    }).select('group process').lean();
+
+    const uniqueGroupIds = [...new Set(submissionsForContext.map(s => s.group.toString()))];
+    const uniqueProcessIds = [...new Set(submissionsForContext.map(s => s.process.toString()))];
+
+    const availableGroups = await Group.find({ _id: { $in: uniqueGroupIds } }).select('name').lean();
+    const availableProcesses = await Process.find({ _id: { $in: uniqueProcessIds } }).select('name').lean();
+
+    return res.status(200).json({
+      ...record,
+      questions,
+      summary: { institutionName: (admin.institution as any).name, totalSubmissions },
+      filters: {
+        availableGroups,
+        availableProcesses,
+      },
+    });
+  } catch (error) {
+    console.error('Error al obtener análisis del registro:', error);
     return res.status(500).json({ message: 'Error del servidor.' });
   }
 };

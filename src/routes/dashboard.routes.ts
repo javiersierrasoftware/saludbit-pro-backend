@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware';
-import { getStats, getSubmissionsByRecord, getWeeklyProgress, getMonthlyProgress, getStudentRecordSummary, getAssignmentSummary, getInstitutionSummary } from '../controllers/dashboard.controller';
+import { getStats, getSubmissionsByRecord, getWeeklyProgress, getMonthlyProgress, getStudentRecordSummary, getAssignmentSummary, getInstitutionSummary, getRecordAnalysis } from '../controllers/dashboard.controller';
 
 const router = Router();
 
@@ -12,5 +12,6 @@ router.get('/monthly-progress', getMonthlyProgress);
 router.get('/student-record-summary', getStudentRecordSummary);
 router.get('/assignment-summary', getAssignmentSummary);
 router.get('/institution-summary', getInstitutionSummary);
+router.get('/record-analysis/:recordId', getRecordAnalysis);
 
 export default router;

@@ -76,3 +76,36 @@ export const login = async (req: Request, res: Response) => {
     return res.status(500).json({ message: 'Server error' });
   }
 };
+
+export const changePassword = async (req: Request, res: Response) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = (req as any).userId;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Todos los campos son requeridos.' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: 'La nueva contraseña debe tener al menos 8 caracteres.' });
+    }
+
+    const user = await User.findById(userId).select('+password');
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    }
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'La contraseña actual es incorrecta.' });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    return res.status(200).json({ message: 'Contraseña actualizada correctamente.' });
+  } catch (error) {
+    console.error('Error al cambiar contraseña:', error);
+    return res.status(500).json({ message: 'Error del servidor.' });
+  }
+};

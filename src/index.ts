@@ -5,10 +5,10 @@ import authRoutes from './routes/auth.routes';
 import institutionRoutes from './routes/institution.routes';
 import userRoutes from './routes/user.routes';
 import groupRoutes from './routes/group.routes'; // ✅ Nuevo
-import processRoutes from './routes/process.routes'; // ✅ Nuevo
-import recordRoutes from './routes/record.routes'; // ✅ Nuevo
-import submissionRoutes from './routes/submission.routes'; // ✅ Nuevo
-import dashboardRoutes from './routes/dashboard.routes'; // ✅ Nuevo
+import processRoutes from './routes/process.routes';
+import recordRoutes from './routes/record.routes';
+import submissionRoutes from './routes/submission.routes';
+import dashboardRoutes from './routes/dashboard.routes';
 
 dotenv.config();
 const app = express();
@@ -26,10 +26,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/institutions', institutionRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/groups', groupRoutes); // ✅ Ruta para grupos
-app.use('/api/processes', processRoutes); // ✅ Ruta para procesos
-app.use('/api/records', recordRoutes); // ✅ Ruta para registros
-app.use('/api/submissions', submissionRoutes); // ✅ Ruta para envíos
-app.use('/api/dashboard', dashboardRoutes); // ✅ Ruta para el dashboard
+app.use('/api/processes', processRoutes);
+app.use('/api/records', recordRoutes);
+app.use('/api/submissions', submissionRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // Puerto y conexión
 const PORT = Number(process.env.PORT) || 3000;

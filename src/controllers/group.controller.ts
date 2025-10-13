@@ -181,7 +181,10 @@ export const joinGroup = async (req: Request, res: Response) => {
     group.members.push(userId as any);
     await group.save();
 
-    return res.status(200).json({ message: 'Te has unido al grupo exitosamente.', group, user: await User.findById(userId).populate('institution', 'name') }); // Devolvemos el usuario actualizado
+    // Populamos los campos necesarios para que el frontend renderice la tarjeta correctamente
+    const populatedGroup = await Group.findById(group._id).populate('createdBy', 'name _id').populate('processes', 'name code');
+
+    return res.status(200).json({ message: 'Te has unido al grupo exitosamente.', group: populatedGroup, user: await User.findById(userId).populate('institution', 'name') }); // Devolvemos el usuario actualizado
   } catch (error) {
     console.error('Error al unirse al grupo:', error);
     return res.status(500).json({ message: 'Error del servidor al unirse al grupo.' });
