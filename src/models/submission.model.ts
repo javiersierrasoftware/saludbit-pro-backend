@@ -14,6 +14,8 @@ export interface ISubmission extends Document {
   process: mongoose.Types.ObjectId;
   student: mongoose.Types.ObjectId;
   answers: { questionIndex: number; answer: any }[];
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const SubmissionSchema: Schema<ISubmission> = new Schema<ISubmission>(
