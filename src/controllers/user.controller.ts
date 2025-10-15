@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { User } from '../models/user.model';
+import { Group } from '../models/group.model';
 import { Institution } from '../models/institution.model';
 
 // Actualizar institución de un usuario
@@ -78,5 +79,29 @@ export const updateUserRole = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error al actualizar el rol:', error);
     return res.status(500).json({ message: 'Error del servidor al actualizar el rol.' });
+  }
+};
+
+// Eliminar la cuenta de un usuario
+export const deleteUserAccount = async (req: Request, res: Response) => {
+  try {
+    const userIdFromToken = (req as any).userId;
+    const { id } = req.params;
+
+    // Medida de seguridad: un usuario solo puede eliminar su propia cuenta.
+    if (userIdFromToken !== id) {
+      return res.status(403).json({ message: 'No autorizado para realizar esta acción.' });
+    }
+
+    // Opcional: Limpiar datos relacionados (ej. remover al usuario de los grupos)
+    await Group.updateMany({ members: id }, { $pull: { members: id } });
+
+    // Eliminar el usuario
+    await User.findByIdAndDelete(id);
+
+    return res.status(200).json({ message: 'Tu cuenta ha sido eliminada permanentemente.' });
+  } catch (error) {
+    console.error('Error al eliminar la cuenta:', error);
+    return res.status(500).json({ message: 'Error del servidor al eliminar la cuenta.' });
   }
 };
