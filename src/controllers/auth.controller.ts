@@ -4,14 +4,14 @@ import { generateToken } from '../utils/jwt.util';
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { email, password, name } = req.body;
+    const { email, password, name, role } = req.body;
 
     const userExists = await User.findOne({ email });
     if (userExists) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    const newUser = new User({ email, password, name }); // Puedes añadir más campos si los capturas desde el frontend
+    const newUser = new User({ email, password, name, role }); // Ahora se incluye el rol desde el frontend
     const savedUser = await newUser.save();
 
     const token = generateToken(savedUser.id);

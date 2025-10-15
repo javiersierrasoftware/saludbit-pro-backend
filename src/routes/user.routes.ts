@@ -1,17 +1,12 @@
 import { Router } from 'express';
-import {
-  updateInstitution,
-  getUsersByInstitution,
-} from '../controllers/user.controller';
+import { updateUserRole, getUsersByInstitution } from '../controllers/user.controller';
+import { authMiddleware } from '../middlewares/auth.middleware';
 
 const router = Router();
 
-// ✅ Actualizar institución de un usuario
-// PUT /api/users/:id/institution
-router.put('/:id/institution', updateInstitution);
+// Aplicamos el middleware de autenticación a todas las rutas de usuario
+router.use(authMiddleware);
 
-// ✅ Obtener todos los usuarios de una institución
-// GET /api/users/institution/:institutionId
-router.get('/institution/:institutionId', getUsersByInstitution);
+router.put('/:id/role', updateUserRole);
 
 export default router;

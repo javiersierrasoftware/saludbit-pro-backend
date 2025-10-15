@@ -54,3 +54,29 @@ export const getUsersByInstitution = async (req: Request, res: Response) => {
     return res.status(500).json({ message: 'Error del servidor' });
   }
 };
+
+// Actualizar el rol de un usuario
+export const updateUserRole = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+
+    // Validar que el rol sea uno de los permitidos
+    if (!['ADMIN', 'STUDENT', 'SIN_ROL'].includes(role)) {
+      return res.status(400).json({ message: 'El rol proporcionado no es válido.' });
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    }
+
+    user.role = role;
+    await user.save();
+
+    return res.status(200).json({ message: 'Rol actualizado correctamente.' });
+  } catch (error) {
+    console.error('Error al actualizar el rol:', error);
+    return res.status(500).json({ message: 'Error del servidor al actualizar el rol.' });
+  }
+};

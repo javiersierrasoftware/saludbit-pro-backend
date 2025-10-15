@@ -5,7 +5,7 @@ export interface IUser extends Document {
   name: string;
   email: string;
   password?: string;
-  role: 'ADMIN' | 'STUDENT';
+  role: 'ADMIN' | 'STUDENT' | 'SIN_ROL';
   document?: string;
   phone?: string;
   institution?: Types.ObjectId;
@@ -18,7 +18,7 @@ const userSchema = new Schema<IUser>({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true, select: false }, // Ocultar por defecto
-  role: { type: String, enum: ['ADMIN', 'STUDENT'], default: 'STUDENT' },
+  role: { type: String, enum: ['ADMIN', 'STUDENT', 'SIN_ROL'], default: 'SIN_ROL' },
   document: { type: String },
   phone: { type: String },
   institution: { type: Schema.Types.ObjectId, ref: 'Institution', default: null },

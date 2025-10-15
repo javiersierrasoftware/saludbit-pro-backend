@@ -155,27 +155,26 @@ export const joinGroup = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Grupo no encontrado con ese código.' });
     }
 
-    // Verificar si el usuario ya es miembro
-    const studentToUpdate = await User.findById(userId).select('deactivatedGroupIds');
-    if (studentToUpdate && studentToUpdate.deactivatedGroupIds?.some((id: Types.ObjectId) => id.equals(group._id as Types.ObjectId))) {
-      studentToUpdate.deactivatedGroupIds = studentToUpdate.deactivatedGroupIds.filter((id: Types.ObjectId) => !id.equals(group._id as Types.ObjectId));
-      await studentToUpdate.save();
-      return res.status(200).json({ message: 'Has reactivado el grupo.', group, user: studentToUpdate });
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
-    if (group.members.includes(userId as any)) {
-      return res.status(400).json({ message: 'Ya eres miembro de este grupo.' });
+    // Si el usuario es SIN_ROL, se convierte en ESTUDIANTE y se le asigna la institución.
+    if (user.role === 'SIN_ROL') {
+      user.role = 'STUDENT';
+      user.institution = group.institution;
     }
 
-    // ✨ Lógica para asignar la institución del creador del grupo al estudiante
-    const groupCreator = await User.findById(group.createdBy).select('institution');
-    if (groupCreator && groupCreator.institution) {
-      const student = await User.findById(userId).populate('institution', 'name');
-      if (student) {
-        student.institution = groupCreator.institution;
-        await student.save();
-      }
+    // Si el grupo estaba desactivado, lo reactivamos.
+    user.deactivatedGroupIds = user.deactivatedGroupIds?.filter((id: Types.ObjectId) => !id.equals(group._id as Types.ObjectId));
+
+    await user.save();
+
+    if (group.members.includes(userId as any) && !req.body.isRejoin) {
+      return res.status(400).json({ message: 'Ya eres miembro activo de este grupo.' });
     }
+
 
     // Añadimos al estudiante a la lista de miembros y guardamos el grupo.
     group.members.push(userId as any);
@@ -184,7 +183,7 @@ export const joinGroup = async (req: Request, res: Response) => {
     // Populamos los campos necesarios para que el frontend renderice la tarjeta correctamente
     const populatedGroup = await Group.findById(group._id).populate('createdBy', 'name _id').populate('processes', 'name code');
 
-    return res.status(200).json({ message: 'Te has unido al grupo exitosamente.', group: populatedGroup, user: await User.findById(userId).populate('institution', 'name') }); // Devolvemos el usuario actualizado
+    return res.status(200).json({ message: 'Te has unido al grupo exitosamente.', group: populatedGroup, user: await User.findById(userId).populate('institution', 'name') });
   } catch (error) {
     console.error('Error al unirse al grupo:', error);
     return res.status(500).json({ message: 'Error del servidor al unirse al grupo.' });
